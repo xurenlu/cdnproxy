@@ -196,49 +196,55 @@ func (h *Handler) buildUpstreamURL(r *http.Request) (string, error) {
 }
 
 func (h *Handler) isAccessAllowed(r *http.Request) (bool, string) {
-	ua := r.UserAgent()
 	ref := r.Referer()
 
-	uaCommon := containsAny(ua, commonBrowserUAs)
-	if !uaCommon {
-		return true, "non-common UA"
+	// No referer -> allow
+	if ref == "" {
+		return true, "no referer"
 	}
 
-	ipLocal := ipRefererPattern.MatchString(ref) || localhostReferer.MatchString(ref)
-	if ipLocal {
+	// If referer is IP or localhost -> allow
+	if ipRefererPattern.MatchString(ref) || localhostReferer.MatchString(ref) {
 		return true, "ip/localhost referer"
 	}
 
-	var host string
-	var count int64 = -1
-	var threshold int64 = 1000
-	var whitelistAllowed bool
-
-	if ref != "" {
-		if u, err := url.Parse(ref); err == nil && u.Hostname() != "" {
-			host = u.Hostname()
-			if h.configStore != nil {
-				if tv, err2 := h.configStore.GetReferrerThreshold(r.Context()); err2 == nil {
-					threshold = tv
-				}
-			}
-			if h.counterStore != nil {
-				if n, err := h.counterStore.IncrementReferrerCount(r.Context(), host); err == nil {
-					count = n
-					if n <= threshold {
-						return true, fmt.Sprintf("under threshold (%d <= %d) for %s", n, threshold, host)
-					}
-				}
-			}
-			if allowed, err := h.whitelistStore.ContainsAllowedSuffix(r.Context(), host); err == nil && allowed {
-				whitelistAllowed = true
-				return true, "whitelist suffix"
-			}
-		}
+	u, err := url.Parse(ref)
+	if err != nil || u.Hostname() == "" {
+		// Malformed or empty host in referer -> allow
+		return true, "invalid referer host"
+	}
+	host := u.Hostname()
+	// If hostname parses as an IP -> allow
+	if net.ParseIP(host) != nil {
+		return true, "ip referer host"
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true, "localhost referer host"
 	}
 
-	reason := fmt.Sprintf("blocked: ua_common=%t, ip_or_local=%t, ref_host=%q, count=%d, threshold=%d, whitelist=%t", uaCommon, ipLocal, host, count, threshold, whitelistAllowed)
-	return false, reason
+	// Domain referer: check threshold, then whitelist
+	var threshold int64 = 1000
+	if h.configStore != nil {
+		if tv, err2 := h.configStore.GetReferrerThreshold(r.Context()); err2 == nil {
+			threshold = tv
+		}
+	}
+	var n int64 = -1
+	if h.counterStore != nil {
+		if v, err2 := h.counterStore.IncrementReferrerCount(r.Context(), host); err2 == nil {
+			n = v
+		}
+	}
+	if n >= 0 && n <= threshold {
+		return true, fmt.Sprintf("under threshold (%d <= %d) for %s", n, threshold, host)
+	}
+
+	// Over threshold: require whitelist
+	if allowed, err := h.whitelistStore.ContainsAllowedSuffix(r.Context(), host); err == nil && allowed {
+		return true, "whitelist suffix"
+	}
+
+	return false, fmt.Sprintf("ref domain over threshold and not whitelisted: host=%s count=%d threshold=%d", host, n, threshold)
 }
 
 func isHopByHopHeader(k string) bool {
