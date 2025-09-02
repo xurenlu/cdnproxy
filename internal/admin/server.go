@@ -267,7 +267,7 @@ const loginHTML = `{{define "login"}}{{template "layout" .}}{{end}}{{define "con
     <input name="password" type="password" placeholder="密码" required />
   </div>
   <button type="submit">登录</button>
-  <p style="margin-top:8px;color:#666">默认：admin / cdnproxy123!</p>
+  <p style="margin-top:8px;color:#666">请使用管理员提供的账号登录。</p>
 {{end}}`
 
 const indexHTML = `{{define "index"}}{{template "layout" .}}{{end}}{{define "content"}}
