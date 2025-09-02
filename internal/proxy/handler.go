@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -61,6 +62,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Access control
 	allowed, reason := h.isAccessAllowed(r)
 	if !allowed {
+		w.Header().Set("X-Blocked-Reason", reason)
 		http.Error(w, "forbidden: "+reason, http.StatusForbidden)
 		return
 	}
@@ -197,41 +199,46 @@ func (h *Handler) isAccessAllowed(r *http.Request) (bool, string) {
 	ua := r.UserAgent()
 	ref := r.Referer()
 
-	// 1) 非常见浏览器 UA 允许：如果 UA 不包含常见浏览器特征则允许
-	if !containsAny(ua, commonBrowserUAs) {
+	uaCommon := containsAny(ua, commonBrowserUAs)
+	if !uaCommon {
 		return true, "non-common UA"
 	}
 
-	// 2) Referer 是 IP 或开发环境（localhost 等）允许
-	if ipRefererPattern.MatchString(ref) || localhostReferer.MatchString(ref) {
+	ipLocal := ipRefererPattern.MatchString(ref) || localhostReferer.MatchString(ref)
+	if ipLocal {
 		return true, "ip/localhost referer"
 	}
 
-	// 3) Referer 是域名：若 24h 内访问次数未超过阈值则放行，否则要求白名单
+	var host string
+	var count int64 = -1
+	var threshold int64 = 1000
+	var whitelistAllowed bool
+
 	if ref != "" {
 		if u, err := url.Parse(ref); err == nil && u.Hostname() != "" {
-			host := u.Hostname()
+			host = u.Hostname()
+			if h.configStore != nil {
+				if tv, err2 := h.configStore.GetReferrerThreshold(r.Context()); err2 == nil {
+					threshold = tv
+				}
+			}
 			if h.counterStore != nil {
 				if n, err := h.counterStore.IncrementReferrerCount(r.Context(), host); err == nil {
-					var threshold int64 = 1000
-					if h.configStore != nil {
-						if tv, err2 := h.configStore.GetReferrerThreshold(r.Context()); err2 == nil {
-							threshold = tv
-						}
-					}
+					count = n
 					if n <= threshold {
-						return true, "under threshold"
+						return true, fmt.Sprintf("under threshold (%d <= %d) for %s", n, threshold, host)
 					}
 				}
 			}
-			allowed, err := h.whitelistStore.ContainsAllowedSuffix(r.Context(), host)
-			if err == nil && allowed {
+			if allowed, err := h.whitelistStore.ContainsAllowedSuffix(r.Context(), host); err == nil && allowed {
+				whitelistAllowed = true
 				return true, "whitelist suffix"
 			}
 		}
 	}
 
-	return false, "blocked by policy"
+	reason := fmt.Sprintf("blocked: ua_common=%t, ip_or_local=%t, ref_host=%q, count=%d, threshold=%d, whitelist=%t", uaCommon, ipLocal, host, count, threshold, whitelistAllowed)
+	return false, reason
 }
 
 func isHopByHopHeader(k string) bool {
