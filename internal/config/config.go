@@ -1,0 +1,66 @@
+package config
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"os"
+	"strconv"
+	"time"
+)
+
+type Config struct {
+	Port          string
+	RedisURL      string
+	CacheTTL      time.Duration
+	AdminUsername string
+	AdminPassword string
+	SessionTTL    time.Duration
+}
+
+func Load() Config {
+	// PORT default 8080 (user preference)
+	port := getenv("PORT", "8080")
+
+	// Redis URL: prefer REDIS_URL; if empty, fallback to user-provided Railway internal default
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://default:fwuVkYeWWlaxeNDUlABLbJRnZmNVLWVw@redis.railway.internal:6379"
+	}
+
+	ttlSeconds := getenvInt("CACHE_TTL_SECONDS", 43200)          // 12h
+	sessionTTLSeconds := getenvInt("SESSION_TTL_SECONDS", 86400) // 24h
+
+	adminUser := getenv("ADMIN_USERNAME", "admin")
+	adminPass := getenv("ADMIN_PASSWORD", "cdnproxy123!")
+
+	return Config{
+		Port:          port,
+		RedisURL:      redisURL,
+		CacheTTL:      time.Duration(ttlSeconds) * time.Second,
+		AdminUsername: adminUser,
+		AdminPassword: adminPass,
+		SessionTTL:    time.Duration(sessionTTLSeconds) * time.Second,
+	}
+}
+
+func getenv(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func getenvInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func generateRandomHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}

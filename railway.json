@@ -1,0 +1,18 @@
+{
+  "build": {
+    "builder": "DOCKERFILE"
+  },
+  "deploy": {
+    "startCommand": "/cdnproxy",
+    "restartPolicyType": "ON_FAILURE"
+  },
+  "env": {
+    "PORT": "8080",
+    "CACHE_TTL_SECONDS": "43200",
+    "SESSION_TTL_SECONDS": "86400",
+    "ADMIN_USERNAME": "admin",
+    "ADMIN_PASSWORD": "cdnproxy123!"
+  }
+}
+
+
