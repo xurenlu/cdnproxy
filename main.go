@@ -12,6 +12,7 @@ import (
 	"cdnproxy/internal/admin"
 	"cdnproxy/internal/cache"
 	"cdnproxy/internal/config"
+	"cdnproxy/internal/docs"
 	"cdnproxy/internal/proxy"
 	"cdnproxy/internal/storage"
 )
@@ -39,6 +40,9 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+
+	// Docs page
+	mux.HandleFunc("/docs", docs.Handler())
 
 	// Admin routes mounted under /admin/
 	adminServer.RegisterRoutes(mux)
