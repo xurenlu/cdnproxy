@@ -1,8 +1,11 @@
 package proxy
 
 import (
+	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +17,8 @@ import (
 	"cdnproxy/internal/cache"
 	"cdnproxy/internal/config"
 	"cdnproxy/internal/storage"
+
+	"github.com/chai2010/webp"
 )
 
 var (
@@ -76,8 +81,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	key := h.cache.BuildKey(method, upstreamURL)
 	if e, _ := h.cache.Get(r.Context(), key); e != nil {
+		// 设置优化的Cache-Control头
+		contentType := e.ContentType
+		if contentType == "" {
+			contentType = e.Headers["Content-Type"]
+		}
+		cacheControl := cache.GetCacheControlByContentType(contentType)
+		w.Header().Set("Cache-Control", cacheControl)
+
+		// 复制其他响应头
 		for k, v := range e.Headers {
-			w.Header().Set(k, v)
+			if k != "Cache-Control" { // 避免覆盖我们设置的Cache-Control
+				w.Header().Set(k, v)
+			}
 		}
 		w.WriteHeader(e.StatusCode)
 		if method == http.MethodGet && len(e.Body) > 0 {
@@ -103,6 +119,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Copy headers
 	headers := map[string]string{}
+	contentType := ""
 	for k, vals := range resp.Header {
 		// Filter hop-by-hop headers
 		if isHopByHopHeader(k) {
@@ -111,9 +128,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(vals) > 0 {
 			w.Header()[k] = vals
 			headers[k] = vals[0]
+			if k == "Content-Type" {
+				contentType = vals[0]
+			}
 		}
 	}
-	w.WriteHeader(resp.StatusCode)
+
+	// 设置优化的Cache-Control头
+	cacheControl := cache.GetCacheControlByContentType(contentType)
+	w.Header().Set("Cache-Control", cacheControl)
 
 	var body []byte
 	if method == http.MethodGet {
@@ -133,11 +156,45 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.Copy(w, resp2.Body)
 			return
 		}
+
+		// 检查是否需要图片格式转换
+		userAgent := r.Header.Get("User-Agent")
+		acceptHeader := r.Header.Get("Accept")
+		if h.shouldConvertToWebP(contentType, userAgent, acceptHeader) {
+			webpBody, err := h.convertToWebP(body, contentType)
+			if err == nil && len(webpBody) > 0 {
+				body = webpBody
+				contentType = "image/webp"
+				w.Header().Set("Content-Type", "image/webp")
+			}
+		}
+
+		// 检查是否需要压缩
+		acceptEncoding := r.Header.Get("Accept-Encoding")
+		compressedBody, encoding := h.compressBody(body, acceptEncoding)
+		if encoding != "" {
+			w.Header().Set("Content-Encoding", encoding)
+			w.Header().Set("Vary", "Accept-Encoding")
+			body = compressedBody
+		}
+
+		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(body)
+	} else {
+		w.WriteHeader(resp.StatusCode)
 	}
 
+	// 根据内容类型确定TTL
+	ttl := cache.GetTTLByContentType(contentType, h.cfg.CacheTTL)
+
 	// Cache store
-	_ = h.cache.Set(r.Context(), key, &cache.Entry{StatusCode: resp.StatusCode, Headers: headers, Body: body, StoredAt: time.Now()}, h.cfg.CacheTTL)
+	_ = h.cache.Set(r.Context(), key, &cache.Entry{
+		StatusCode:  resp.StatusCode,
+		Headers:     headers,
+		Body:        body,
+		StoredAt:    time.Now(),
+		ContentType: contentType,
+	}, ttl)
 }
 
 func (h *Handler) proxyNoCache(w http.ResponseWriter, r *http.Request, upstreamURL string) {
@@ -272,4 +329,172 @@ func containsAny(s string, subs []string) bool {
 		}
 	}
 	return false
+}
+
+// compressBody 根据Accept-Encoding头压缩响应体
+func (h *Handler) compressBody(body []byte, acceptEncoding string) ([]byte, string) {
+	// 如果响应体太小，不进行压缩
+	if len(body) < 1024 {
+		return body, ""
+	}
+
+	// 检查是否已经压缩过
+	if strings.Contains(acceptEncoding, "gzip") {
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		if _, err := gz.Write(body); err == nil {
+			if err := gz.Close(); err == nil {
+				// 只有压缩后确实更小才使用压缩
+				if buf.Len() < len(body) {
+					return buf.Bytes(), "gzip"
+				}
+			}
+		}
+	}
+
+	return body, ""
+}
+
+// shouldConvertToWebP 判断是否应该转换为WebP格式
+func (h *Handler) shouldConvertToWebP(contentType, userAgent, acceptHeader string) bool {
+	// 只处理图片类型
+	if !strings.HasPrefix(contentType, "image/") {
+		return false
+	}
+
+	// 检查User-Agent是否支持WebP（主要判断依据）
+	userAgent = strings.ToLower(userAgent)
+
+	// Chrome/Chromium 23+ 支持WebP
+	if strings.Contains(userAgent, "chrome") && !strings.Contains(userAgent, "edg") {
+		return true
+	}
+
+	// Firefox 65+ 支持WebP (2019年1月发布)
+	if strings.Contains(userAgent, "firefox") {
+		// 提取Firefox版本号进行更精确的判断
+		if version := h.extractFirefoxVersion(userAgent); version >= 65 {
+			return true
+		}
+	}
+
+	// Safari 14+ 支持WebP (2020年9月发布)
+	if strings.Contains(userAgent, "safari") && !strings.Contains(userAgent, "chrome") {
+		// 提取Safari版本号
+		if version := h.extractSafariVersion(userAgent); version >= 14 {
+			return true
+		}
+	}
+
+	// Edge 18+ 支持WebP (2018年10月发布)
+	if strings.Contains(userAgent, "edg") {
+		return true
+	}
+
+	// Opera 12+ 支持WebP
+	if strings.Contains(userAgent, "opr") || strings.Contains(userAgent, "opera") {
+		return true
+	}
+
+	// 如果User-Agent不支持，但Accept头明确支持WebP，也可以转换
+	// 这适用于一些API客户端或特殊工具
+	if strings.Contains(acceptHeader, "image/webp") {
+		return true
+	}
+
+	return false
+}
+
+// extractFirefoxVersion 提取Firefox版本号
+func (h *Handler) extractFirefoxVersion(userAgent string) int {
+	// 查找 "Firefox/" 后的版本号
+	start := strings.Index(userAgent, "firefox/")
+	if start == -1 {
+		return 0
+	}
+	start += 8 // "firefox/".length
+
+	// 找到版本号结束位置
+	end := start
+	for end < len(userAgent) && (userAgent[end] >= '0' && userAgent[end] <= '9' || userAgent[end] == '.') {
+		end++
+	}
+
+	// 解析主版本号
+	versionStr := userAgent[start:end]
+	if dotIndex := strings.Index(versionStr, "."); dotIndex != -1 {
+		versionStr = versionStr[:dotIndex]
+	}
+
+	// 转换为整数
+	var version int
+	fmt.Sscanf(versionStr, "%d", &version)
+	return version
+}
+
+// extractSafariVersion 提取Safari版本号
+func (h *Handler) extractSafariVersion(userAgent string) int {
+	// 查找 "Version/" 后的版本号
+	start := strings.Index(userAgent, "version/")
+	if start == -1 {
+		return 0
+	}
+	start += 8 // "version/".length
+
+	// 找到版本号结束位置
+	end := start
+	for end < len(userAgent) && (userAgent[end] >= '0' && userAgent[end] <= '9' || userAgent[end] == '.') {
+		end++
+	}
+
+	// 解析主版本号
+	versionStr := userAgent[start:end]
+	if dotIndex := strings.Index(versionStr, "."); dotIndex != -1 {
+		versionStr = versionStr[:dotIndex]
+	}
+
+	// 转换为整数
+	var version int
+	fmt.Sscanf(versionStr, "%d", &version)
+	return version
+}
+
+// convertToWebP 将图片转换为WebP格式
+func (h *Handler) convertToWebP(body []byte, contentType string) ([]byte, error) {
+	// 只处理支持的图片格式
+	if !strings.Contains(contentType, "image/jpeg") &&
+		!strings.Contains(contentType, "image/png") &&
+		!strings.Contains(contentType, "image/gif") {
+		return nil, fmt.Errorf("unsupported image type: %s", contentType)
+	}
+
+	// 解码图片
+	img, _, err := image.Decode(bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode image: %v", err)
+	}
+
+	// 转换为WebP格式
+	var buf bytes.Buffer
+
+	// 设置WebP编码选项
+	options := &webp.Options{
+		Lossless: false, // 使用有损压缩以获得更好的压缩率
+		Quality:  80,    // 质量设置为80，平衡文件大小和图片质量
+	}
+
+	// 编码为WebP
+	if err := webp.Encode(&buf, img, options); err != nil {
+		return nil, fmt.Errorf("failed to encode WebP: %v", err)
+	}
+
+	webpData := buf.Bytes()
+
+	// 只有WebP版本确实更小才返回WebP
+	if len(webpData) < len(body) {
+		return webpData, nil
+	}
+
+	// 如果WebP版本更大，返回原始图片
+	return body, nil
 }

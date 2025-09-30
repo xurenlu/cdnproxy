@@ -7,6 +7,7 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -17,10 +18,11 @@ type Cache struct {
 }
 
 type Entry struct {
-	StatusCode int
-	Headers    map[string]string
-	Body       []byte
-	StoredAt   time.Time
+	StatusCode  int
+	Headers     map[string]string
+	Body        []byte
+	StoredAt    time.Time
+	ContentType string
 }
 
 func NewRedisClient(redisURL string) (*redis.Client, error) {
@@ -70,4 +72,76 @@ func (c *Cache) Set(ctx context.Context, key string, e *Entry, ttl time.Duration
 		return err
 	}
 	return c.client.Set(ctx, key, buf.Bytes(), ttl).Err()
+}
+
+// GetTTLByContentType 根据Content-Type返回合适的TTL
+func GetTTLByContentType(contentType string, defaultTTL time.Duration) time.Duration {
+	if contentType == "" {
+		return defaultTTL
+	}
+
+	contentType = strings.ToLower(contentType)
+
+	// 静态资源 - 长期缓存 (7天)
+	if strings.Contains(contentType, "text/css") ||
+		strings.Contains(contentType, "application/javascript") ||
+		strings.Contains(contentType, "text/javascript") ||
+		strings.Contains(contentType, "application/json") {
+		return 7 * 24 * time.Hour
+	}
+
+	// 图片资源 - 中期缓存 (1天)
+	if strings.Contains(contentType, "image/") {
+		return 24 * time.Hour
+	}
+
+	// 字体文件 - 长期缓存 (30天)
+	if strings.Contains(contentType, "font/") ||
+		strings.Contains(contentType, "application/font-") {
+		return 30 * 24 * time.Hour
+	}
+
+	// HTML文档 - 短期缓存 (1小时)
+	if strings.Contains(contentType, "text/html") {
+		return time.Hour
+	}
+
+	// 其他类型使用默认TTL
+	return defaultTTL
+}
+
+// GetCacheControlByContentType 根据Content-Type返回合适的Cache-Control头
+func GetCacheControlByContentType(contentType string) string {
+	if contentType == "" {
+		return "public, max-age=43200" // 默认12小时
+	}
+
+	contentType = strings.ToLower(contentType)
+
+	// 静态资源 - 长期缓存
+	if strings.Contains(contentType, "text/css") ||
+		strings.Contains(contentType, "application/javascript") ||
+		strings.Contains(contentType, "text/javascript") ||
+		strings.Contains(contentType, "application/json") {
+		return "public, max-age=604800, immutable" // 7天
+	}
+
+	// 图片资源 - 中期缓存
+	if strings.Contains(contentType, "image/") {
+		return "public, max-age=86400" // 1天
+	}
+
+	// 字体文件 - 长期缓存
+	if strings.Contains(contentType, "font/") ||
+		strings.Contains(contentType, "application/font-") {
+		return "public, max-age=2592000, immutable" // 30天
+	}
+
+	// HTML文档 - 短期缓存
+	if strings.Contains(contentType, "text/html") {
+		return "public, max-age=3600" // 1小时
+	}
+
+	// 其他类型
+	return "public, max-age=43200" // 默认12小时
 }
