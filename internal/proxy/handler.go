@@ -89,9 +89,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		cacheControl := cache.GetCacheControlByContentType(contentType)
 		w.Header().Set("Cache-Control", cacheControl)
 
-		// 复制其他响应头
+		// 复制其他响应头（排除需要动态设置的头）
 		for k, v := range e.Headers {
-			if k != "Cache-Control" { // 避免覆盖我们设置的Cache-Control
+			lowerK := strings.ToLower(k)
+			// 避免覆盖我们需要动态设置的头
+			if k != "Cache-Control" && lowerK != "content-encoding" && lowerK != "content-length" {
 				w.Header().Set(k, v)
 			}
 		}
@@ -136,6 +138,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for k, vals := range resp.Header {
 		// Filter hop-by-hop headers
 		if isHopByHopHeader(k) {
+			continue
+		}
+		// 过滤压缩相关的头，因为我们会自己处理压缩
+		// Content-Encoding: Go的http.Client会自动解压，我们需要重新压缩
+		// Content-Length: 压缩后长度会变化，由Go自动设置
+		lowerK := strings.ToLower(k)
+		if lowerK == "content-encoding" || lowerK == "content-length" {
 			continue
 		}
 		if len(vals) > 0 {
