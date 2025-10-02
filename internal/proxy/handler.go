@@ -95,9 +95,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set(k, v)
 			}
 		}
+
+		// 根据客户端需求动态压缩缓存的数据
+		body := e.Body
+		if method == http.MethodGet && len(body) > 0 {
+			acceptEncoding := r.Header.Get("Accept-Encoding")
+			compressedBody, encoding := h.compressBody(body, acceptEncoding)
+			if encoding != "" {
+				w.Header().Set("Content-Encoding", encoding)
+				w.Header().Set("Vary", "Accept-Encoding")
+				body = compressedBody
+			}
+		}
+
 		w.WriteHeader(e.StatusCode)
-		if method == http.MethodGet && len(e.Body) > 0 {
-			_, _ = w.Write(e.Body)
+		if method == http.MethodGet && len(body) > 0 {
+			_, _ = w.Write(body)
 		}
 		return
 	}
@@ -169,7 +182,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// 检查是否需要压缩
+		// 先保存未压缩的原始数据到缓存
+		// 根据内容类型确定TTL
+		ttl := cache.GetTTLByContentType(contentType, h.cfg.CacheTTL)
+		_ = h.cache.Set(r.Context(), key, &cache.Entry{
+			StatusCode:  resp.StatusCode,
+			Headers:     headers,
+			Body:        body, // 存储未压缩的原始数据
+			StoredAt:    time.Now(),
+			ContentType: contentType,
+		}, ttl)
+
+		// 再根据客户端需求压缩响应
 		acceptEncoding := r.Header.Get("Accept-Encoding")
 		compressedBody, encoding := h.compressBody(body, acceptEncoding)
 		if encoding != "" {
@@ -183,18 +207,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(resp.StatusCode)
 	}
-
-	// 根据内容类型确定TTL
-	ttl := cache.GetTTLByContentType(contentType, h.cfg.CacheTTL)
-
-	// Cache store
-	_ = h.cache.Set(r.Context(), key, &cache.Entry{
-		StatusCode:  resp.StatusCode,
-		Headers:     headers,
-		Body:        body,
-		StoredAt:    time.Now(),
-		ContentType: contentType,
-	}, ttl)
 }
 
 func (h *Handler) proxyNoCache(w http.ResponseWriter, r *http.Request, upstreamURL string) {

@@ -40,7 +40,7 @@ func NewCache(client *redis.Client) *Cache {
 
 func (c *Cache) BuildKey(method, upstreamURL string) string {
 	h := sha256.Sum256([]byte(method + " " + upstreamURL))
-	return "cache:" + hex.EncodeToString(h[:])
+	return "cache:v2:" + hex.EncodeToString(h[:])
 }
 
 func (c *Cache) Get(ctx context.Context, key string) (*Entry, error) {

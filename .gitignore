@@ -1,0 +1,22 @@
+# 编译产物
+cdnproxy
+*.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 临时文件
+*.log
+*.tmp
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 缓存数据目录（不是源码目录）
+/cache/
+/data/
+
