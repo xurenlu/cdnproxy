@@ -10,7 +10,8 @@ import (
 
 type Config struct {
 	Port          string
-	RedisURL      string
+	DataDir       string        // 数据存储目录
+	CacheDir      string        // 缓存文件目录
 	CacheTTL      time.Duration
 	AdminUsername string
 	AdminPassword string
@@ -21,11 +22,9 @@ func Load() Config {
 	// PORT default 8080 (user preference)
 	port := getenv("PORT", "8080")
 
-	// Redis URL: prefer REDIS_URL; if empty, fallback to user-provided Railway internal default
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		redisURL = "redis://default:fwuVkYeWWlaxeNDUlABLbJRnZmNVLWVw@redis.railway.internal:6379"
-	}
+	// 数据目录配置
+	dataDir := getenv("DATA_DIR", "./data")
+	cacheDir := getenv("CACHE_DIR", "./data/cache")
 
 	ttlSeconds := getenvInt("CACHE_TTL_SECONDS", 43200)          // 12h
 	sessionTTLSeconds := getenvInt("SESSION_TTL_SECONDS", 86400) // 24h
@@ -35,7 +34,8 @@ func Load() Config {
 
 	return Config{
 		Port:          port,
-		RedisURL:      redisURL,
+		DataDir:       dataDir,
+		CacheDir:      cacheDir,
 		CacheTTL:      time.Duration(ttlSeconds) * time.Second,
 		AdminUsername: adminUser,
 		AdminPassword: adminPass,

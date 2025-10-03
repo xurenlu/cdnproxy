@@ -17,9 +17,18 @@ WORKDIR /
 # 安装运行时所需的WebP库
 RUN apk add --no-cache ca-certificates libwebp
 COPY --from=build /bin/cdnproxy /cdnproxy
+
+# 创建数据目录（容器内）
+RUN mkdir -p /data/cache && chown -R 65532:65532 /data
+
+# 环境变量
 ENV PORT=8080
+ENV DATA_DIR=/data
+ENV CACHE_DIR=/data/cache
+
+# 设置数据目录为卷
+VOLUME ["/data"]
+
 EXPOSE 8080
 USER 65532:65532
 ENTRYPOINT ["/cdnproxy"]
-
-

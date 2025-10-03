@@ -1,26 +1,23 @@
 version: '3.8'
 services:
-  redis:
-    image: redis:6-alpine
-    restart: always
-    volumes:
-      - redis_data:/data
-    container_name: cdnproxy_redis
-
   cdnproxy:
     build: .
     restart: always
     ports:
       - "8080:8080"
+    volumes:
+      # 挂载数据目录，确保缓存和配置持久化
+      - cdnproxy_data:/data
     environment:
       - PORT=8080
-      - REDIS_URL=redis://redis:6379/0
-      # 可选：设置管理员凭据, 请务必修改为强密码
+      - DATA_DIR=/data
+      - CACHE_DIR=/data/cache
+      - CACHE_TTL_SECONDS=43200
+      - SESSION_TTL_SECONDS=86400
+      # 管理员凭据（请务必修改为强密码！）
       - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=cdnproxy123!
-    depends_on:
-      - redis
+      - ADMIN_PASSWORD=your_strong_password_here
     container_name: cdnproxy_app
 
 volumes:
-  redis_data:
+  cdnproxy_data:

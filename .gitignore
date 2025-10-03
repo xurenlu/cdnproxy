@@ -1,22 +1,31 @@
-# 编译产物
+# 编译输出
 cdnproxy
 *.exe
+*.test
+*.prof
+
+# 数据目录
+/data/
+*.cache
+
+# 环境配置
+.env
+.env.local
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# 临时文件
-*.log
-*.tmp
-
-# 操作系统文件
+# OS
 .DS_Store
 Thumbs.db
 
-# 缓存数据目录（不是源码目录）
-/cache/
-/data/
+# 测试覆盖率
+coverage.txt
+coverage.html
 
+# 日志
+*.log

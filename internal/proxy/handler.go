@@ -3,6 +3,9 @@ package proxy
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
@@ -16,7 +19,6 @@ import (
 
 	"cdnproxy/internal/cache"
 	"cdnproxy/internal/config"
-	"cdnproxy/internal/storage"
 
 	"github.com/chai2010/webp"
 )
@@ -29,14 +31,29 @@ var (
 
 type Handler struct {
 	cfg            config.Config
-	cache          *cache.Cache
-	whitelistStore *storage.WhitelistStore
+	cache          *cache.DiskCache
+	whitelistStore WhitelistStore
 	httpClient     *http.Client
-	configStore    *storage.ConfigStore
-	counterStore   *storage.CounterStore
+	configStore    ConfigStore
+	counterStore   CounterStore
 }
 
-func NewHandler(cfg config.Config, cacheStore *cache.Cache, whitelistStore *storage.WhitelistStore, configStore *storage.ConfigStore, counterStore *storage.CounterStore) http.Handler {
+// WhitelistStore 接口定义
+type WhitelistStore interface {
+	ContainsAllowedSuffix(ctx context.Context, host string) (bool, error)
+}
+
+// ConfigStore 接口定义
+type ConfigStore interface {
+	GetReferrerThreshold(ctx context.Context) (int64, error)
+}
+
+// CounterStore 接口定义
+type CounterStore interface {
+	IncrementReferrerCount(ctx context.Context, host string) (int64, error)
+}
+
+func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore WhitelistStore, configStore ConfigStore, counterStore CounterStore) http.Handler {
 	// 优化 TCP 参数，适配跨境大文件传输
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
@@ -63,7 +80,7 @@ func NewHandler(cfg config.Config, cacheStore *cache.Cache, whitelistStore *stor
 	}
 	return &Handler{
 		cfg:            cfg,
-		cache:          cacheStore,
+		cache:          diskCache,
 		whitelistStore: whitelistStore,
 		configStore:    configStore,
 		counterStore:   counterStore,
@@ -94,7 +111,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := h.cache.BuildKey(method, upstreamURL)
+	// 为缓存生成键
+	key := buildCacheKey(method, upstreamURL)
 	if e, _ := h.cache.Get(r.Context(), key); e != nil {
 		// 设置优化的Cache-Control头
 		contentType := e.ContentType
@@ -262,15 +280,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 先保存未压缩的原始数据到缓存
-		// 根据内容类型确定TTL
-		ttl := cache.GetTTLByContentType(contentType, h.cfg.CacheTTL)
+		// DiskCache 使用文件过期时间，TTL 在文件系统级别处理
 		_ = h.cache.Set(r.Context(), key, &cache.Entry{
 			StatusCode:  resp.StatusCode,
 			Headers:     headers,
 			Body:        body, // 存储未压缩的原始数据
 			StoredAt:    time.Now(),
 			ContentType: contentType,
-		}, ttl)
+		}, h.cfg.CacheTTL)
 
 		// 再根据客户端需求压缩响应
 		acceptEncoding := r.Header.Get("Accept-Encoding")
@@ -555,6 +572,12 @@ func (h *Handler) extractSafariVersion(userAgent string) int {
 	var version int
 	fmt.Sscanf(versionStr, "%d", &version)
 	return version
+}
+
+// buildCacheKey 生成缓存键
+func buildCacheKey(method, upstreamURL string) string {
+	h := sha256.Sum256([]byte(method + " " + upstreamURL))
+	return "cache:v3:" + hex.EncodeToString(h[:])
 }
 
 // convertToWebP 将图片转换为WebP格式

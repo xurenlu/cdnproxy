@@ -12,26 +12,47 @@ import (
 
 	"cdnproxy/internal/config"
 	"cdnproxy/internal/storage"
-
-	redis "github.com/redis/go-redis/v9"
 )
 
 const sessionCookieName = "cp_session"
 
 type Server struct {
 	cfg            config.Config
-	redis          *redis.Client
-	whitelistStore *storage.WhitelistStore
-	configStore    *storage.ConfigStore
+	sessionStore   *storage.FileSessionStore
+	whitelistStore WhitelistStore
+	configStore    ConfigStore
 	tplLogin       *template.Template
 	tplIndex       *template.Template
 }
 
-func NewServer(cfg config.Config, redisClient *redis.Client, whitelistStore *storage.WhitelistStore, configStore *storage.ConfigStore) *Server {
-	s := &Server{cfg: cfg, redis: redisClient, whitelistStore: whitelistStore, configStore: configStore}
+// WhitelistStore 接口定义
+type WhitelistStore interface {
+	List(ctx context.Context) ([]string, error)
+	Add(ctx context.Context, suffix string) error
+	Remove(ctx context.Context, suffix string) error
+}
+
+// ConfigStore 接口定义
+type ConfigStore interface {
+	GetReferrerThreshold(ctx context.Context) (int64, error)
+	SetReferrerThreshold(ctx context.Context, n int64) error
+}
+
+func NewServer(cfg config.Config, whitelistStore WhitelistStore, configStore ConfigStore) (*Server, error) {
+	sessionStore, err := storage.NewFileSessionStore(cfg.DataDir, cfg.SessionTTL)
+	if err != nil {
+		return nil, err
+	}
+
+	s := &Server{
+		cfg:            cfg,
+		sessionStore:   sessionStore,
+		whitelistStore: whitelistStore,
+		configStore:    configStore,
+	}
 	s.tplLogin = template.Must(template.New("base_login").Parse(layoutHTML + loginHTML))
 	s.tplIndex = template.Must(template.New("base_index").Parse(layoutHTML + indexHTML))
-	return s
+	return s, nil
 }
 
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
@@ -63,8 +84,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		password := strings.TrimSpace(r.Form.Get("password"))
 		if username == s.cfg.AdminUsername && password == s.cfg.AdminPassword {
 			token := randomHex(16)
-			ctx := r.Context()
-			if err := s.redis.Set(ctx, s.sessionKey(token), "1", s.cfg.SessionTTL).Err(); err != nil {
+			if err := s.sessionStore.Set(token, "1"); err != nil {
 				http.Error(w, "session error", http.StatusInternalServerError)
 				return
 			}
@@ -95,7 +115,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	token := getSessionCookie(r)
 	if token != "" {
-		_ = s.redis.Del(r.Context(), s.sessionKey(token)).Err()
+		_ = s.sessionStore.Delete(token)
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", Expires: time.Unix(0, 0), MaxAge: -1})
 	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
@@ -161,10 +181,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-		ok, err := s.redis.Exists(ctx, s.sessionKey(token)).Result()
-		if err != nil || ok == 0 {
+		if !s.sessionStore.Exists(token) {
 			http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
 			return
 		}
@@ -196,10 +213,6 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/", http.StatusSeeOther)
-}
-
-func (s *Server) sessionKey(token string) string {
-	return "session:" + token
 }
 
 func randomHex(n int) string {

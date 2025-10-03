@@ -20,19 +20,37 @@ import (
 func main() {
 	cfg := config.Load()
 
-	// Redis client
-	redisClient, err := cache.NewRedisClient(cfg.RedisURL)
+	// 使用硬盘缓存替代 Redis
+	diskCache, err := cache.NewDiskCache(cfg.CacheDir, 100*1024*1024) // 最大缓存单文件 100MB
 	if err != nil {
-		log.Fatalf("failed to create redis client: %v", err)
+		log.Fatalf("failed to create disk cache: %v", err)
 	}
 
-	// Subsystems
-	cacheStore := cache.NewCache(redisClient)
-	whitelistStore := storage.NewWhitelistStore(redisClient)
-	configStore := storage.NewConfigStore(redisClient)
-	counterStore := storage.NewCounterStore(redisClient)
-	adminServer := admin.NewServer(cfg, redisClient, whitelistStore, configStore)
-	proxyHandler := proxy.NewHandler(cfg, cacheStore, whitelistStore, configStore, counterStore)
+	// 使用文件存储替代 Redis
+	whitelistStore, err := storage.NewFileWhitelistStore(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("failed to create whitelist store: %v", err)
+	}
+
+	configStore, err := storage.NewFileConfigStore(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("failed to create config store: %v", err)
+	}
+
+	counterStore, err := storage.NewFileCounterStore(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("failed to create counter store: %v", err)
+	}
+
+	// 启动定期清理过期缓存
+	go cleanupCache(diskCache)
+
+	adminServer, err := admin.NewServer(cfg, whitelistStore, configStore)
+	if err != nil {
+		log.Fatalf("failed to create admin server: %v", err)
+	}
+
+	proxyHandler := proxy.NewHandler(cfg, diskCache, whitelistStore, configStore, counterStore)
 
 	mux := http.NewServeMux()
 	// Health check
@@ -75,6 +93,17 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("server shutdown error: %v", err)
+	}
+}
+
+func cleanupCache(diskCache *cache.DiskCache) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if err := diskCache.Cleanup(context.Background()); err != nil {
+			log.Printf("cache cleanup error: %v", err)
+		}
 	}
 }
 
