@@ -37,16 +37,29 @@ type Handler struct {
 }
 
 func NewHandler(cfg config.Config, cacheStore *cache.Cache, whitelistStore *storage.WhitelistStore, configStore *storage.ConfigStore, counterStore *storage.CounterStore) http.Handler {
+	// 优化 TCP 参数，适配跨境大文件传输
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 60 * time.Second,
+		// 启用 TCP Fast Open（Linux 需要内核支持）
+	}
+	
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 60 * time.Second}).DialContext,
+		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          200,
-		MaxIdleConnsPerHost:   100, // 增加每个主机的连接池大小
+		MaxIdleConnsPerHost:   100,  // 增加每个主机的连接池大小
+		MaxConnsPerHost:       0,    // 0 表示不限制
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second, // 等待响应头的超时时间
+		ResponseHeaderTimeout: 30 * time.Second,
+		// 启用 HTTP/2，对多路复用和头部压缩有帮助
+		DisableCompression:    false, // 允许自动解压缩
+		// 增大缓冲区，适配跨境高延迟网络
+		WriteBufferSize:       64 * 1024, // 64KB 写缓冲
+		ReadBufferSize:        64 * 1024, // 64KB 读缓冲
 	}
 	return &Handler{
 		cfg:            cfg,
@@ -125,11 +138,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to create request", http.StatusInternalServerError)
 		return
 	}
-	req.Header.Set("User-Agent", "cdnproxy/1.0")
-
+	
+	// 优先使用客户端的 User-Agent，让 CDN 能正确识别
+	clientUA := r.Header.Get("User-Agent")
+	if clientUA != "" {
+		req.Header.Set("User-Agent", clientUA)
+	} else {
+		// 模拟主流浏览器 UA，避免被限速
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	}
+	
 	// 转发客户端的 Range 请求到上游服务器
 	if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
 		req.Header.Set("Range", rangeHeader)
+	}
+	
+	// 转发 Accept-Encoding，让上游服务器知道客户端支持的压缩格式
+	if acceptEncoding := r.Header.Get("Accept-Encoding"); acceptEncoding != "" {
+		req.Header.Set("Accept-Encoding", acceptEncoding)
 	}
 
 	resp, err := h.httpClient.Do(req)
@@ -269,7 +295,14 @@ func (h *Handler) proxyNoCache(w http.ResponseWriter, r *http.Request, upstreamU
 		return
 	}
 	copyHeaders(req.Header, r.Header)
-	req.Header.Set("User-Agent", "cdnproxy/1.0")
+	
+	// 使用客户端的 User-Agent 或模拟浏览器
+	clientUA := r.Header.Get("User-Agent")
+	if clientUA != "" {
+		req.Header.Set("User-Agent", clientUA)
+	} else {
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	}
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
