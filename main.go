@@ -53,9 +53,9 @@ func main() {
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           loggingMiddleware(mux),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		ReadHeaderTimeout: 30 * time.Second,
+		ReadTimeout:       0, // 无限制，允许长时间的大文件传输
+		WriteTimeout:      0, // 无限制，允许长时间的大文件传输
 		IdleTimeout:       120 * time.Second,
 	}
 

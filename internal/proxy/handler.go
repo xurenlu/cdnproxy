@@ -39,12 +39,14 @@ type Handler struct {
 func NewHandler(cfg config.Config, cacheStore *cache.Cache, whitelistStore *storage.WhitelistStore, configStore *storage.ConfigStore, counterStore *storage.CounterStore) http.Handler {
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 60 * time.Second}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          200,
+		MaxIdleConnsPerHost:   100, // 增加每个主机的连接池大小
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second, // 等待响应头的超时时间
 	}
 	return &Handler{
 		cfg:            cfg,
@@ -52,7 +54,7 @@ func NewHandler(cfg config.Config, cacheStore *cache.Cache, whitelistStore *stor
 		whitelistStore: whitelistStore,
 		configStore:    configStore,
 		counterStore:   counterStore,
-		httpClient:     &http.Client{Transport: tr, Timeout: 60 * time.Second},
+		httpClient:     &http.Client{Transport: tr, Timeout: 0}, // 使用0表示无超时，让流式传输不受限制
 	}
 }
 
@@ -125,6 +127,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("User-Agent", "cdnproxy/1.0")
 
+	// 转发客户端的 Range 请求到上游服务器
+	if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
+		req.Header.Set("Range", rangeHeader)
+	}
+
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
 		http.Error(w, "upstream error", http.StatusBadGateway)
@@ -135,15 +142,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Copy headers
 	headers := map[string]string{}
 	contentType := ""
+	contentLength := int64(0)
+
 	for k, vals := range resp.Header {
 		// Filter hop-by-hop headers
 		if isHopByHopHeader(k) {
 			continue
 		}
+		lowerK := strings.ToLower(k)
+
+		// 保存 Content-Length 用于判断文件大小
+		if lowerK == "content-length" {
+			if len(vals) > 0 {
+				fmt.Sscanf(vals[0], "%d", &contentLength)
+			}
+		}
+
 		// 过滤压缩相关的头，因为我们会自己处理压缩
 		// Content-Encoding: Go的http.Client会自动解压，我们需要重新压缩
 		// Content-Length: 压缩后长度会变化，由Go自动设置
-		lowerK := strings.ToLower(k)
 		if lowerK == "content-encoding" || lowerK == "content-length" {
 			continue
 		}
@@ -160,8 +177,35 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cacheControl := cache.GetCacheControlByContentType(contentType)
 	w.Header().Set("Cache-Control", cacheControl)
 
+	// 定义大文件阈值（5MB），大于此值的文件使用流式传输
+	const largeFileThreshold = 5 * 1024 * 1024
+
 	var body []byte
 	if method == http.MethodGet {
+		// 大文件直接流式传输，不缓存
+		if contentLength > largeFileThreshold {
+			// 支持 Range 请求
+			w.Header().Set("Accept-Ranges", "bytes")
+
+			// 复制所有响应头（包括 Content-Range, Content-Length 等）
+			for k, vals := range resp.Header {
+				lowerK := strings.ToLower(k)
+				// 对于大文件流式传输，保留 Content-Length 和 Content-Range
+				if !isHopByHopHeader(k) && lowerK != "content-encoding" {
+					w.Header()[k] = vals
+				}
+			}
+
+			// 如果上游返回 206 Partial Content，我们也返回 206
+			// 否则返回原始状态码
+			w.WriteHeader(resp.StatusCode)
+
+			// 直接流式传输，边下载边输出
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		// 小文件才读入内存进行处理和缓存
 		var errCopy error
 		body, errCopy = io.ReadAll(resp.Body)
 		if errCopy != nil {
@@ -179,7 +223,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 检查是否需要图片格式转换
+		// 检查是否需要图片格式转换（只对小文件）
 		userAgent := r.Header.Get("User-Agent")
 		acceptHeader := r.Header.Get("Accept")
 		if h.shouldConvertToWebP(contentType, userAgent, acceptHeader) {
