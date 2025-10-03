@@ -1,12 +1,35 @@
+# Git
 .git
 .gitignore
+
+# Documentation
+*.md
+docs/
+
+# Development files
+.env
+.env.local
+
+# Build artifacts
+cdnproxy
+*.exe
+*.test
+*.prof
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
-node_modules
-dist
-bin
-*.log
-**/*.swp
-**/*.swo
-**/.env
+Thumbs.db
 
+# Test coverage
+coverage.txt
+coverage.html
 
+# Fly.io
+fly.toml

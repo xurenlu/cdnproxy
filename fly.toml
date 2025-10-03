@@ -1,0 +1,58 @@
+# Fly.io 配置文件
+# 部署到亚洲节点，解决跨境传输性能问题
+
+app = "cdnproxy"
+primary_region = "hkg"  # 香港 - 主区域
+# 其他可选区域: sin (新加坡), nrt (东京), syd (悉尼)
+
+# 使用 Dockerfile 构建
+[build]
+  dockerfile = "Dockerfile"
+
+# 环境变量
+[env]
+  PORT = "8080"
+  CACHE_TTL_SECONDS = "43200"
+  SESSION_TTL_SECONDS = "86400"
+  ADMIN_USERNAME = "admin"
+
+# HTTP 服务配置
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # HTTP 端口
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+    force_https = true
+
+  # HTTPS 端口
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  # 健康检查
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+    protocol = "http"
+
+# 虚拟机配置
+[vm]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_gb = 0.5
+
+# 可选：多区域部署（取消注释以启用）
+# [regions]
+#   hkg = true  # 香港
+#   sin = true  # 新加坡
+#   nrt = true  # 东京
+
