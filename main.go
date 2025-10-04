@@ -21,7 +21,7 @@ func main() {
 	cfg := config.Load()
 
 	// 使用硬盘缓存替代 Redis
-	diskCache, err := cache.NewDiskCache(cfg.CacheDir, 120*1024*1024) // 最大缓存单文件 100MB
+	diskCache, err := cache.NewDiskCache(cfg.CacheDir, 100*1024*1024) // 最大缓存单文件 100MB
 	if err != nil {
 		log.Fatalf("failed to create disk cache: %v", err)
 	}
