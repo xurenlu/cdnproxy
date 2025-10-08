@@ -59,7 +59,11 @@ go run ./...
 本地测试示例：
 
 ```bash
+# 本地开发测试
 curl -i http://localhost:8080/cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
+
+# 使用线上服务测试
+curl -i https://cdnproxy.shifen.de/cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
 ```
 
 ## Docker 部署
@@ -106,11 +110,21 @@ flyctl deploy
 
 详细指南：[DEPLOY_FLYIO.md](DEPLOY_FLYIO.md)
 
-示例访问：
+## 使用示例
 
+本项目已部署在 `https://cdnproxy.shifen.de`，可直接使用。
+
+**原始 URL:**
 ```
-https://cdnproxy.some.im/cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
+https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
 ```
+
+**通过本代理访问:**
+```
+https://cdnproxy.shifen.de/cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
+```
+
+**使用方法：** 将原始 CDN URL 中的 `https://` 替换为 `https://cdnproxy.shifen.de/` 即可。
 
 若访问被阻止，请确保：
 - 使用非常见浏览器 UA，或
