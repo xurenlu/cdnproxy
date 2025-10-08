@@ -171,9 +171,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		req.Header.Set("Range", rangeHeader)
 	}
 	
-	// 不转发 Accept-Encoding 头，让上游返回未压缩的数据
-	// 我们会在本地根据客户端需求进行压缩（第 293-299 行）
-	// 这样可以避免 Go http.Client 自动解压缩导致的问题
+	// 主动请求上游返回 gzip 压缩数据，加快下载速度
+	// 因为 DisableCompression: true，Go 不会自动处理，我们手动解压（第 275-286 行）
+	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
