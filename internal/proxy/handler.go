@@ -171,10 +171,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		req.Header.Set("Range", rangeHeader)
 	}
 	
-	// 转发 Accept-Encoding，让上游服务器知道客户端支持的压缩格式
-	if acceptEncoding := r.Header.Get("Accept-Encoding"); acceptEncoding != "" {
-		req.Header.Set("Accept-Encoding", acceptEncoding)
-	}
+	// 不转发 Accept-Encoding 头，让上游返回未压缩的数据
+	// 我们会在本地根据客户端需求进行压缩（第 293-299 行）
+	// 这样可以避免 Go http.Client 自动解压缩导致的问题
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
