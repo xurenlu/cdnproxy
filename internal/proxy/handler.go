@@ -73,7 +73,7 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 		ExpectContinueTimeout: 1 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 		// 启用 HTTP/2，对多路复用和头部压缩有帮助
-		DisableCompression:    false, // 允许自动解压缩
+		DisableCompression:    true, // 禁用自动压缩，避免上游返回 gzip 导致问题，我们自己处理压缩
 		// 增大缓冲区，适配跨境高延迟网络
 		WriteBufferSize:       64 * 1024, // 64KB 写缓冲
 		ReadBufferSize:        64 * 1024, // 64KB 读缓冲
@@ -186,6 +186,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	headers := map[string]string{}
 	contentType := ""
 	contentLength := int64(0)
+	contentEncoding := ""
 
 	for k, vals := range resp.Header {
 		// Filter hop-by-hop headers
@@ -201,8 +202,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// 保存 Content-Encoding，稍后需要手动解压
+		if lowerK == "content-encoding" && len(vals) > 0 {
+			contentEncoding = vals[0]
+		}
+
 		// 过滤压缩相关的头，因为我们会自己处理压缩
-		// Content-Encoding: Go的http.Client会自动解压，我们需要重新压缩
+		// Content-Encoding: 我们需要手动解压上游的 gzip 数据
 		// Content-Length: 压缩后长度会变化，由Go自动设置
 		if lowerK == "content-encoding" || lowerK == "content-length" {
 			continue
@@ -264,6 +270,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			defer resp2.Body.Close()
 			_, _ = io.Copy(w, resp2.Body)
 			return
+		}
+
+		// 如果上游返回了 gzip 压缩的数据，手动解压
+		// (因为我们设置了 DisableCompression: true，不会自动解压)
+		if contentEncoding == "gzip" {
+			gzReader, err := gzip.NewReader(bytes.NewReader(body))
+			if err == nil {
+				decompressed, err := io.ReadAll(gzReader)
+				gzReader.Close()
+				if err == nil {
+					body = decompressed
+				}
+			}
 		}
 
 		// 检查是否需要图片格式转换（只对小文件）
