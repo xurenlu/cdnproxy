@@ -60,23 +60,23 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 		KeepAlive: 60 * time.Second,
 		// 启用 TCP Fast Open（Linux 需要内核支持）
 	}
-	
+
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          200,
-		MaxIdleConnsPerHost:   100,  // 增加每个主机的连接池大小
-		MaxConnsPerHost:       0,    // 0 表示不限制
+		MaxIdleConnsPerHost:   100, // 增加每个主机的连接池大小
+		MaxConnsPerHost:       0,   // 0 表示不限制
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 		// 启用 HTTP/2，对多路复用和头部压缩有帮助
-		DisableCompression:    true, // 禁用自动压缩，避免上游返回 gzip 导致问题，我们自己处理压缩
+		DisableCompression: true, // 禁用自动压缩，避免上游返回 gzip 导致问题，我们自己处理压缩
 		// 增大缓冲区，适配跨境高延迟网络
-		WriteBufferSize:       64 * 1024, // 64KB 写缓冲
-		ReadBufferSize:        64 * 1024, // 64KB 读缓冲
+		WriteBufferSize: 64 * 1024, // 64KB 写缓冲
+		ReadBufferSize:  64 * 1024, // 64KB 读缓冲
 	}
 	return &Handler{
 		cfg:            cfg,
@@ -96,7 +96,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Access control
+	// 检查是否是 API 域名（这些请求不缓存，支持 WebSocket/SSE/长连接）
+	if h.isAPIDomain(upstreamURL) {
+		// API 代理不需要访问控制检查（由上游 API 服务自己控制）
+		h.proxyAPIRequest(w, r, upstreamURL)
+		return
+	}
+
+	// Access control (仅对 CDN 代理进行访问控制)
 	allowed, reason := h.isAccessAllowed(r)
 	if !allowed {
 		w.Header().Set("X-Blocked-Reason", reason)
@@ -156,7 +163,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to create request", http.StatusInternalServerError)
 		return
 	}
-	
+
 	// 优先使用客户端的 User-Agent，让 CDN 能正确识别
 	clientUA := r.Header.Get("User-Agent")
 	if clientUA != "" {
@@ -165,12 +172,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 模拟主流浏览器 UA，避免被限速
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	}
-	
+
 	// 转发客户端的 Range 请求到上游服务器
 	if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
 		req.Header.Set("Range", rangeHeader)
 	}
-	
+
 	// 主动请求上游返回 gzip 压缩数据，加快下载速度
 	// 因为 DisableCompression: true，Go 不会自动处理，我们手动解压（第 275-286 行）
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -330,7 +337,7 @@ func (h *Handler) proxyNoCache(w http.ResponseWriter, r *http.Request, upstreamU
 		return
 	}
 	copyHeaders(req.Header, r.Header)
-	
+
 	// 使用客户端的 User-Agent 或模拟浏览器
 	clientUA := r.Header.Get("User-Agent")
 	if clientUA != "" {
@@ -461,6 +468,24 @@ func containsAny(s string, subs []string) bool {
 			return true
 		}
 	}
+	return false
+}
+
+// isAPIDomain 检查 URL 是否属于 API 域名
+func (h *Handler) isAPIDomain(upstreamURL string) bool {
+	urlLower := strings.ToLower(upstreamURL)
+
+	// 检查是否匹配任何配置的 API 域名
+	for _, domain := range h.cfg.APIDomains {
+		domainLower := strings.ToLower(domain)
+		// 检查 https://domain 或 http://domain
+		if strings.Contains(urlLower, "://"+domainLower+"/") ||
+			strings.Contains(urlLower, "://"+domainLower+"?") ||
+			strings.HasSuffix(urlLower, "://"+domainLower) {
+			return true
+		}
+	}
+
 	return false
 }
 

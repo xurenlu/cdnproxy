@@ -13,6 +13,7 @@
 
 ## 功能
 
+### CDN 代理功能
 - 基于路径的反向代理：/host/path → https://host/path
 - 访问控制策略：
   1. 非常见浏览器 User-Agent 允许
@@ -21,6 +22,16 @@
 - **硬盘缓存** GET/HEAD 响应（默认 12 小时）
 - 大文件流式传输（>5MB），支持 Range 请求
 - /admin 管理界面：登录后增删白名单后缀
+
+### API 代理功能 (v2.1 新增)
+- 支持代理 OpenAI、Claude、Poe 等 AI 服务的 API 请求
+- **不缓存** API 响应（每次都是实时请求）
+- 支持 **WebSocket** 连接（实时双向通信）
+- 支持 **SSE (Server-Sent Events)** 流式响应（如 OpenAI 的 stream 模式）
+- 支持 **POST 大数据**（无大小限制）
+- 支持**长时间连接**（无超时限制）
+- 自动识别 API 域名，无需额外配置
+- API 请求不受访问控制限制（由上游 API 服务自己控制）
 
 默认管理员：`admin` / `cdnproxy123!`，可通过环境变量覆盖。
 
@@ -38,6 +49,7 @@
 - `CACHE_TTL_SECONDS`：缓存 TTL，默认 43200（12h）
 - `SESSION_TTL_SECONDS`：管理登录会话 TTL，默认 86400（24h）
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD`：管理登录凭据
+- `API_DOMAINS`：额外的 API 域名（逗号分隔），如 `api.example.com,api2.example.com`
 
 ## 启动
 
@@ -114,6 +126,8 @@ flyctl deploy
 
 本项目已部署在 `https://cdnproxy.shifen.de`，可直接使用。
 
+### CDN 资源代理
+
 **原始 URL:**
 ```
 https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
@@ -125,6 +139,54 @@ https://cdnproxy.shifen.de/cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstr
 ```
 
 **使用方法：** 将原始 CDN URL 中的 `https://` 替换为 `https://cdnproxy.shifen.de/` 即可。
+
+### API 服务代理
+
+**OpenAI API 示例:**
+
+原始请求：
+```bash
+curl https://api.openai.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
+
+通过代理：
+```bash
+curl https://cdnproxy.shifen.de/api.openai.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
+
+**Claude API 示例:**
+
+```bash
+# 原始: https://api.anthropic.com/v1/messages
+# 代理: https://cdnproxy.shifen.de/api.anthropic.com/v1/messages
+```
+
+**支持的 API 域名：**
+- `api.openai.com` - OpenAI API
+- `api.anthropic.com` - Claude API
+- `claude.ai` - Claude Web
+- `poe.com` / `api.poe.com` - Poe
+- `gemini.google.com` - Google Gemini
+- `generativelanguage.googleapis.com` - Google AI
+- `api.cohere.ai` - Cohere
+- `api.together.xyz` - Together AI
+- `api.groq.com` - Groq
+
+可通过环境变量 `API_DOMAINS` 添加更多域名（逗号分隔）。
 
 若访问被阻止，请确保：
 - 使用非常见浏览器 UA，或
