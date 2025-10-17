@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"io"
 	"log"
@@ -76,6 +77,10 @@ func (h *Handler) proxyAPIRequest(w http.ResponseWriter, r *http.Request, upstre
 
 // proxyWebSocket 处理 WebSocket 连接
 func (h *Handler) proxyWebSocket(w http.ResponseWriter, r *http.Request, upstreamURL string) {
+	// 添加超时控制
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
 	// 将 http:// 或 https:// 替换为 ws:// 或 wss://
 	wsURL := strings.Replace(upstreamURL, "https://", "wss://", 1)
 	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
@@ -91,7 +96,7 @@ func (h *Handler) proxyWebSocket(w http.ResponseWriter, r *http.Request, upstrea
 	copyWebSocketHeaders(upstreamReq.Header, r.Header)
 
 	// 建立到上游的连接
-	upstreamConn, err := h.dialUpstream(wsURL, upstreamReq)
+	upstreamConn, err := h.dialUpstreamWithTimeout(ctx, wsURL, upstreamReq)
 	if err != nil {
 		log.Printf("WebSocket upstream dial error: %v", err)
 		http.Error(w, "failed to connect to upstream", http.StatusBadGateway)
@@ -113,7 +118,7 @@ func (h *Handler) proxyWebSocket(w http.ResponseWriter, r *http.Request, upstrea
 	}
 	defer clientConn.Close()
 
-	// 双向复制数据
+	// 双向复制数据，带超时控制
 	errChan := make(chan error, 2)
 
 	// 客户端 -> 上游
@@ -128,11 +133,108 @@ func (h *Handler) proxyWebSocket(w http.ResponseWriter, r *http.Request, upstrea
 		errChan <- err
 	}()
 
-	// 等待任一方向完成或出错
-	err = <-errChan
-	if err != nil && err != io.EOF {
-		log.Printf("WebSocket proxy error: %v", err)
+	// 等待任一方向完成、出错或超时
+	select {
+	case err = <-errChan:
+		if err != nil && err != io.EOF {
+			log.Printf("WebSocket proxy error: %v", err)
+		}
+	case <-ctx.Done():
+		log.Printf("WebSocket connection timeout")
 	}
+}
+
+// dialUpstreamWithTimeout 建立到上游服务器的 TCP 连接并发送 HTTP 请求（带超时）
+func (h *Handler) dialUpstreamWithTimeout(ctx context.Context, wsURL string, req *http.Request) (net.Conn, error) {
+	// 解析 URL
+	var host string
+	var useTLS bool
+	if strings.HasPrefix(wsURL, "wss://") {
+		host = strings.TrimPrefix(wsURL, "wss://")
+		useTLS = true
+	} else {
+		host = strings.TrimPrefix(wsURL, "ws://")
+		useTLS = false
+	}
+
+	// 提取 host 和 path
+	pathStart := strings.Index(host, "/")
+	var path string
+	if pathStart > 0 {
+		path = host[pathStart:]
+		host = host[:pathStart]
+	} else {
+		path = "/"
+	}
+
+	// 如果 host 没有端口，添加默认端口
+	if !strings.Contains(host, ":") {
+		if useTLS {
+			host = host + ":443"
+		} else {
+			host = host + ":80"
+		}
+	}
+
+	// 建立 TCP 连接（带超时）
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second, // 缩短连接超时
+		KeepAlive: 30 * time.Second, // 缩短保活时间
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", host)
+	if err != nil {
+		return nil, err
+	}
+
+	// 如果是 wss，需要 TLS 包装
+	if useTLS {
+		tlsConn := wrapTLS(conn, strings.Split(host, ":")[0])
+		conn = tlsConn
+	}
+
+	// 构建并发送 WebSocket 升级请求
+	upgradeReq := "GET " + path + " HTTP/1.1\r\n"
+	upgradeReq += "Host: " + strings.Split(host, ":")[0] + "\r\n"
+	for k, vals := range req.Header {
+		for _, v := range vals {
+			upgradeReq += k + ": " + v + "\r\n"
+		}
+	}
+	upgradeReq += "\r\n"
+
+	_, err = conn.Write([]byte(upgradeReq))
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	// 读取响应头，确认升级成功
+	reader := bufio.NewReader(conn)
+	statusLine, err := reader.ReadString('\n')
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	// 检查状态码是否为 101
+	if !strings.Contains(statusLine, "101") {
+		conn.Close()
+		return nil, io.ErrUnexpectedEOF
+	}
+
+	// 跳过响应头
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+		if line == "\r\n" || line == "\n" {
+			break
+		}
+	}
+
+	return conn, nil
 }
 
 // dialUpstream 建立到上游服务器的 TCP 连接并发送 HTTP 请求
@@ -230,6 +332,10 @@ func (h *Handler) dialUpstream(wsURL string, req *http.Request) (net.Conn, error
 
 // streamSSE 流式传输 SSE 响应
 func (h *Handler) streamSSE(w http.ResponseWriter, body io.Reader) {
+	// 添加超时控制
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
 	// 确保响应可以被 flush
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -243,15 +349,21 @@ func (h *Handler) streamSSE(w http.ResponseWriter, body io.Reader) {
 	scanner.Split(bufio.ScanLines)
 
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		// 写入行
-		_, err := w.Write(append(line, '\n'))
-		if err != nil {
-			log.Printf("SSE write error: %v", err)
+		select {
+		case <-ctx.Done():
+			log.Printf("SSE stream timeout")
 			return
+		default:
+			line := scanner.Bytes()
+			// 写入行
+			_, err := w.Write(append(line, '\n'))
+			if err != nil {
+				log.Printf("SSE write error: %v", err)
+				return
+			}
+			// 立即刷新，确保数据发送到客户端
+			flusher.Flush()
 		}
-		// 立即刷新，确保数据发送到客户端
-		flusher.Flush()
 	}
 
 	if err := scanner.Err(); err != nil && err != io.EOF {

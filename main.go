@@ -18,6 +18,11 @@ import (
 )
 
 func main() {
+	// 设置文件描述符限制
+	if err := setFDLimit(4096); err != nil {
+		log.Printf("Failed to set FD limit: %v", err)
+	}
+
 	cfg := config.Load()
 
 	// 使用硬盘缓存替代 Redis
@@ -71,10 +76,10 @@ func main() {
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           loggingMiddleware(mux),
-		ReadHeaderTimeout: 30 * time.Second,
-		ReadTimeout:       0, // 无限制，允许长时间的大文件传输
-		WriteTimeout:      0, // 无限制，允许长时间的大文件传输
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second, // 添加读取超时
+		WriteTimeout:      30 * time.Second, // 添加写入超时
+		IdleTimeout:       60 * time.Second, // 缩短空闲超时
 	}
 
 	go func() {
@@ -125,4 +130,11 @@ type logResponseWriter struct {
 func (lrw *logResponseWriter) WriteHeader(code int) {
 	lrw.statusCode = code
 	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func setFDLimit(limit int) error {
+	var rLimit syscall.Rlimit
+	rLimit.Cur = uint64(limit)
+	rLimit.Max = uint64(limit)
+	return syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 }

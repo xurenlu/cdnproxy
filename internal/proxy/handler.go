@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -36,6 +37,7 @@ type Handler struct {
 	httpClient     *http.Client
 	configStore    ConfigStore
 	counterStore   CounterStore
+	semaphore      chan struct{} // 添加信号量
 }
 
 // WhitelistStore 接口定义
@@ -65,18 +67,18 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          200,
-		MaxIdleConnsPerHost:   100, // 增加每个主机的连接池大小
-		MaxConnsPerHost:       0,   // 0 表示不限制
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
+		MaxIdleConns:          50,               // 降低到合理值
+		MaxIdleConnsPerHost:   25,               // 降低到合理值
+		MaxConnsPerHost:       100,              // 添加限制！
+		IdleConnTimeout:       30 * time.Second, // 缩短空闲时间
+		TLSHandshakeTimeout:   5 * time.Second,  // 缩短
 		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second, // 缩短
 		// 启用 HTTP/2，对多路复用和头部压缩有帮助
 		DisableCompression: true, // 禁用自动压缩，避免上游返回 gzip 导致问题，我们自己处理压缩
-		// 增大缓冲区，适配跨境高延迟网络
-		WriteBufferSize: 64 * 1024, // 64KB 写缓冲
-		ReadBufferSize:  64 * 1024, // 64KB 读缓冲
+		// 降低缓冲区，减少内存使用
+		WriteBufferSize: 32 * 1024, // 32KB 写缓冲
+		ReadBufferSize:  32 * 1024, // 32KB 读缓冲
 	}
 	return &Handler{
 		cfg:            cfg,
@@ -84,11 +86,29 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 		whitelistStore: whitelistStore,
 		configStore:    configStore,
 		counterStore:   counterStore,
-		httpClient:     &http.Client{Transport: tr, Timeout: 0}, // 使用0表示无超时，让流式传输不受限制
+		httpClient:     &http.Client{Transport: tr, Timeout: 30 * time.Second}, // 添加超时！
+		semaphore:      make(chan struct{}, 50),                                // 最多50个并发
 	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start)
+		if duration > 5*time.Second {
+			log.Printf("SLOW REQUEST: %s %s %s", r.Method, r.URL.Path, duration)
+		}
+	}()
+
+	// 获取信号量
+	select {
+	case h.semaphore <- struct{}{}:
+		defer func() { <-h.semaphore }()
+	case <-r.Context().Done():
+		http.Error(w, "service busy", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Incoming path is like: /cdn.jsdelivr.net/npm/bootstrap@... -> we must reconstruct the upstream URL
 	upstreamURL, err := h.buildUpstreamURL(r)
 	if err != nil {
