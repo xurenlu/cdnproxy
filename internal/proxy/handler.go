@@ -36,6 +36,7 @@ type Handler struct {
 	cache          *cache.DiskCache
 	whitelistStore WhitelistStore
 	httpClient     *http.Client
+	apiClient      *http.Client // API专用客户端（长超时）
 	configStore    ConfigStore
 	counterStore   CounterStore
 	semaphore      chan struct{} // 添加信号量
@@ -93,10 +94,17 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 		whitelistStore: whitelistStore,
 		configStore:    configStore,
 		counterStore:   counterStore,
-		httpClient:     &http.Client{Transport: tr, Timeout: 30 * time.Second}, // 添加超时！
-		semaphore:      make(chan struct{}, 50),                                // 最多50个并发
-		wsSemaphore:    make(chan struct{}, 10),                                // 最多10个WebSocket连接
-		webpSemaphore:  make(chan struct{}, 5),                                 // 最多5个WebP转换并发（CPU密集）
+		httpClient:     &http.Client{Transport: tr, Timeout: 30 * time.Second}, // CDN请求客户端
+		apiClient: &http.Client{ // API请求专用客户端（长超时）
+			Transport: tr,
+			Timeout:   5 * time.Minute,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse // 不自动跟随重定向
+			},
+		},
+		semaphore:     make(chan struct{}, 50), // 最多50个并发
+		wsSemaphore:   make(chan struct{}, 10), // 最多10个WebSocket连接
+		webpSemaphore: make(chan struct{}, 5),  // 最多5个WebP转换并发（CPU密集）
 		bufferPool: sync.Pool{
 			New: func() interface{} {
 				buf := make([]byte, 64*1024) // 64KB 缓冲区

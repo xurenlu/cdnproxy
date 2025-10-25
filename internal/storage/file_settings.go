@@ -106,8 +106,9 @@ type FileCounterStore struct {
 	filePath string
 	mu       sync.RWMutex
 	counters map[string]*counterEntry
-	dirty    bool          // 标记是否有未保存的更改
-	stopCh   chan struct{} // 用于停止后台goroutine
+	dirty    bool           // 标记是否有未保存的更改
+	stopCh   chan struct{}  // 用于停止后台goroutine
+	wg       sync.WaitGroup // 等待后台goroutine退出
 }
 
 type counterEntry struct {
@@ -133,6 +134,7 @@ func NewFileCounterStore(dataDir string) (*FileCounterStore, error) {
 	}
 
 	// 启动后台工作协程
+	store.wg.Add(1)
 	go store.backgroundWorker()
 
 	return store, nil
@@ -230,6 +232,8 @@ func (s *FileCounterStore) IncrementReferrerCount(ctx context.Context, host stri
 
 // backgroundWorker 后台工作协程：定期清理过期数据和异步保存
 func (s *FileCounterStore) backgroundWorker() {
+	defer s.wg.Done() // 确保退出时通知WaitGroup
+
 	cleanupTicker := time.NewTicker(1 * time.Hour) // 清理过期计数器
 	saveTicker := time.NewTicker(10 * time.Second) // 定期保存脏数据（计数器更新频繁，10秒保存一次）
 	defer cleanupTicker.Stop()
@@ -274,6 +278,6 @@ func (s *FileCounterStore) backgroundWorker() {
 // Close 停止后台goroutine并保存数据
 func (s *FileCounterStore) Close() error {
 	close(s.stopCh)
-	time.Sleep(100 * time.Millisecond) // 等待goroutine退出
+	s.wg.Wait() // 等待goroutine真正退出
 	return nil
 }

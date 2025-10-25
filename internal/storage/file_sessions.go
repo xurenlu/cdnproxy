@@ -14,8 +14,9 @@ type FileSessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*sessionData
 	ttl      time.Duration
-	dirty    bool          // 标记是否有未保存的更改
-	stopCh   chan struct{} // 用于停止后台goroutine
+	dirty    bool           // 标记是否有未保存的更改
+	stopCh   chan struct{}  // 用于停止后台goroutine
+	wg       sync.WaitGroup // 等待后台goroutine退出
 }
 
 type sessionData struct {
@@ -42,6 +43,7 @@ func NewFileSessionStore(dataDir string, ttl time.Duration) (*FileSessionStore, 
 	}
 
 	// 启动定期清理过期会话和异步保存的 goroutine
+	store.wg.Add(1)
 	go store.backgroundWorker()
 
 	return store, nil
@@ -129,6 +131,8 @@ func (s *FileSessionStore) Delete(token string) error {
 
 // backgroundWorker 后台工作协程：定期清理过期数据和异步保存
 func (s *FileSessionStore) backgroundWorker() {
+	defer s.wg.Done() // 确保退出时通知WaitGroup
+
 	cleanupTicker := time.NewTicker(10 * time.Minute) // 清理过期会话
 	saveTicker := time.NewTicker(5 * time.Second)     // 定期保存脏数据
 	defer cleanupTicker.Stop()
@@ -173,6 +177,6 @@ func (s *FileSessionStore) backgroundWorker() {
 // Close 停止后台goroutine并保存数据
 func (s *FileSessionStore) Close() error {
 	close(s.stopCh)
-	time.Sleep(100 * time.Millisecond) // 等待goroutine退出
+	s.wg.Wait() // 等待goroutine真正退出
 	return nil
 }

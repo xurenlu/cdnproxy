@@ -36,16 +36,8 @@ func (h *Handler) proxyAPIRequest(w http.ResponseWriter, r *http.Request, upstre
 		req.Header.Set("User-Agent", "cdnproxy/2.0")
 	}
 
-	// 使用专门的 HTTP 客户端（长超时，支持长连接）
-	client := &http.Client{
-		Transport: h.httpClient.Transport,
-		Timeout:   5 * time.Minute, // 5分钟超时，防止永久挂起
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse // 不自动跟随重定向
-		},
-	}
-
-	resp, err := client.Do(req)
+	// 使用专门的 API HTTP 客户端（长超时，支持长连接）
+	resp, err := h.apiClient.Do(req)
 	if err != nil {
 		log.Printf("API proxy error: %v", err)
 		http.Error(w, "upstream API error", http.StatusBadGateway)
