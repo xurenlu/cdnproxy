@@ -1,275 +1,234 @@
-# CDN 代理性能优化指南
+# 性能优化指南
 
-## 问题诊断
+## 当前潜在问题
 
-### 核心问题：地理位置导致的性能瓶颈
+### 1. 内存消耗问题
 
-如果你发现通过代理下载文件（如 10MB）需要 10-15 分钟，而直接下载只需 3 秒，**根本原因通常是服务器部署位置**。
+**问题描述：**
+- 小文件（<5MB）会全量读入内存
+- 解压、转换、压缩过程中会创建多个数据副本
+- 高并发时可能导致内存耗尽
 
-#### 问题分析
-
+**内存占用计算：**
 ```
-直接下载（3秒）：
-中国用户 ──→ CDN 亚洲节点 ──→ 中国用户
-
-通过代理下载（10-15分钟）：
-中国用户 ──→ 美国代理服务器 ──→ CDN 美国节点 ──→ 美国代理 ──→ 中国用户
-              ↑                                           ↓
-              └───────── 数据跨太平洋两次！ ─────────────────┘
+原始文件 + 解压后 + WebP转换 + 压缩后 = 4倍内存占用
+1MB 文件可能占用 4MB 内存
 ```
 
-### 关键因素
+### 2. 硬盘 I/O 问题
 
-1. **CDN 的智能路由**
-   - CDN（如 jsdelivr、unpkg）会根据**客户端 IP** 选择最近的节点
-   - 你的代理在美国 → CDN 给它美国节点
-   - 最终用户在中国 → 数据需要跨境两次传输
-   - **跨太平洋延迟**：150-300ms RTT，丢包率高
+**问题描述：**
+- 频繁的文件读写操作
+- 清理过期文件时遍历整个缓存目录
+- 高并发时 I/O 竞争
 
-2. **User-Agent 识别**
-   - 原代码使用 `User-Agent: cdnproxy/1.0`
-   - CDN 无法识别为浏览器，可能：
-     - 限速
-     - 分配到更慢的节点
-     - 当作爬虫处理
+## 优化建议
 
-3. **TCP 窗口和缓冲区**
-   - 跨境传输需要更大的 TCP 窗口
-   - 默认缓冲区大小不适合高延迟网络
+### 1. 内存优化
 
-## 解决方案
-
-### 🎯 方案一：优化部署位置（最重要）
-
-**推荐部署平台（按优先级）：**
-
-1. **Cloudflare Workers**
-   - 全球 300+ 节点，自动选择最近的执行
-   - 支持 KV 存储做缓存
-   - 免费额度充足
-
-2. **Vercel**
-   - 有香港节点，对亚太用户友好
-   - 自动全球 CDN
-   - 部署简单
-
-3. **AWS/GCP 亚洲区域**
-   - Tokyo (ap-northeast-1)
-   - Singapore (ap-southeast-1)
-   - Hong Kong (ap-east-1)
-
-4. **国内云服务**
-   - 阿里云
-   - 腾讯云
-   - 华为云
-   - **注意**：需要 ICP 备案
-
-5. **自建 VPS**
-   - 租用亚洲地区的 VPS
-   - Vultr Tokyo/Seoul
-   - Linode Tokyo/Singapore
-   - DigitalOcean Singapore
-
-### 🔧 方案二：代码优化（已实现）
-
-#### 1. 传递真实 User-Agent
-
+#### 1.1 流式处理小文件
 ```go
-// 优先使用客户端的 User-Agent
-clientUA := r.Header.Get("User-Agent")
-if clientUA != "" {
-    req.Header.Set("User-Agent", clientUA)
-} else {
-    // 模拟主流浏览器
-    req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...")
+// 建议：即使是小文件也使用流式处理
+if contentLength > 1*1024*1024 { // 1MB 阈值
+    // 流式传输，不读入内存
+    io.Copy(w, resp.Body)
+    return
 }
 ```
 
-**效果**：让 CDN 能正确识别客户端，避免限速
-
-#### 2. 大文件流式传输
-
+#### 1.2 限制并发处理
 ```go
-// 5MB 以上的文件不缓存，直接流式传输
-if contentLength > 5 * 1024 * 1024 {
-    io.Copy(w, resp.Body)  // 边下载边输出
+// 建议：添加并发限制
+var semaphore = make(chan struct{}, 10) // 最多10个并发处理
+
+func (h *Handler) processWithLimit() {
+    semaphore <- struct{}{}
+    defer func() { <-semaphore }()
+    // 处理逻辑
 }
 ```
 
-**效果**：避免等待完整下载，立即开始传输
-
-#### 3. HTTP Range 支持
-
+#### 1.3 内存池复用
 ```go
-// 转发 Range 请求
-if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
-    req.Header.Set("Range", rangeHeader)
+// 建议：使用 sync.Pool 复用缓冲区
+var bufferPool = sync.Pool{
+    New: func() interface{} {
+        return make([]byte, 64*1024) // 64KB 缓冲区
+    },
 }
 ```
 
-**效果**：支持断点续传和分段下载
+### 2. 硬盘 I/O 优化
 
-#### 4. TCP 参数优化
-
+#### 2.1 异步清理
 ```go
-WriteBufferSize: 64 * 1024,  // 64KB 写缓冲
-ReadBufferSize:  64 * 1024,  // 64KB 读缓冲
-MaxConnsPerHost: 0,          // 不限制连接数
+// 建议：异步清理，避免阻塞主流程
+go func() {
+    time.Sleep(5 * time.Minute) // 延迟清理
+    h.cache.Cleanup(context.Background())
+}()
 ```
 
-**效果**：适配跨境高延迟网络
+#### 2.2 批量清理
+```go
+// 建议：批量删除文件，减少系统调用
+func (d *DiskCache) BatchCleanup(ctx context.Context) error {
+    var filesToDelete []string
+    
+    filepath.Walk(d.basePath, func(path string, info os.FileInfo, err error) error {
+        if time.Since(info.ModTime()) > 24*time.Hour {
+            filesToDelete = append(filesToDelete, path)
+        }
+        return nil
+    })
+    
+    // 批量删除
+    for _, file := range filesToDelete {
+        os.Remove(file)
+    }
+}
+```
 
-### 🚀 方案三：使用国内 CDN 镜像
+### 3. 配置优化
 
-如果你的用户主要在中国，可以考虑：
+#### 3.1 环境变量配置
+```bash
+# 建议的配置
+export MAX_CACHE_FILE_SIZE=104857600    # 100MB
+export MAX_CONCURRENT_REQUESTS=50       # 最大并发数
+export CACHE_CLEANUP_INTERVAL=3600      # 清理间隔（秒）
+export MEMORY_LIMIT_MB=512              # 内存限制
+```
 
-1. **Staticfile CDN**（七牛云）
-   ```
-   https://cdn.staticfile.org/...
-   ```
+#### 3.2 监控指标
+```go
+// 建议：添加监控指标
+type Metrics struct {
+    CacheHits     int64
+    CacheMisses   int64
+    MemoryUsage   int64
+    DiskUsage     int64
+    ActiveConns   int64
+}
+```
 
-2. **BootCDN**
-   ```
-   https://cdn.bootcdn.net/...
-   ```
+### 4. 部署优化
 
-3. **字节跳动 CDN**
-   ```
-   https://lf3-cdn-tos.bytecdntp.com/...
-   ```
+#### 4.1 系统级限制
+```bash
+# 限制进程内存使用
+ulimit -v 1048576  # 1GB 虚拟内存限制
 
-4. **替换策略**：
-   - 检测用户位置
-   - 如果在中国，重写 URL 到国内 CDN
-   - 否则使用原始 CDN
+# 限制文件描述符
+ulimit -n 4096
+```
 
-### 📊 性能对比
-
-| 场景 | 延迟 | 带宽 | 适用 |
-|------|------|------|------|
-| 美国代理 → 中国用户 | 300ms RTT | 1-10 Mbps | ❌ 不推荐 |
-| 亚洲代理 → 中国用户 | 30-50ms | 50-100 Mbps | ✅ 推荐 |
-| 国内代理 → 中国用户 | 5-20ms | 100+ Mbps | 🌟 最佳 |
-| Cloudflare Workers | 自动选择最近节点 | 100+ Mbps | 🌟 推荐 |
-
-## 高级优化技术
-
-### 1. 多区域部署
-
+#### 4.2 Docker 资源限制
 ```yaml
-# 在多个地区部署代理服务器
-regions:
-  - us-east-1      # 服务北美用户
-  - eu-west-1      # 服务欧洲用户
-  - ap-southeast-1 # 服务亚太用户
-
-# 使用 GeoDNS 自动路由到最近的服务器
+services:
+  cdnproxy:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
 ```
 
-### 2. HTTP/3 (QUIC)
+### 5. 代码优化建议
 
-- 基于 UDP，减少握手延迟
-- 更好的丢包恢复
-- Go 1.21+ 支持实验性 HTTP/3
-
+#### 5.1 减少内存分配
 ```go
-import "golang.org/x/net/http2"
+// 当前代码问题
+body, err := io.ReadAll(resp.Body) // 全量读取
 
-// 启用 HTTP/3
-server := &http3.Server{
-    Handler: mux,
-    Addr:    ":443",
-}
+// 建议优化
+var buf bytes.Buffer
+buf.Grow(int(contentLength)) // 预分配容量
+io.Copy(&buf, resp.Body)
+body := buf.Bytes()
 ```
 
-### 3. BBR 拥塞控制
-
-在 Linux 服务器上启用 BBR：
-
-```bash
-# 检查内核版本（需要 4.9+）
-uname -r
-
-# 启用 BBR
-echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-sysctl -p
-
-# 验证
-sysctl net.ipv4.tcp_congestion_control
-```
-
-**效果**：在高延迟、有丢包的网络环境下，带宽利用率提升 2-25 倍
-
-### 4. 预连接和连接复用
-
+#### 5.2 流式 WebP 转换
 ```go
-// 对常见的 CDN 域名预建立连接
-var commonCDNs = []string{
-    "cdn.jsdelivr.net",
-    "unpkg.com",
-    "cdnjs.cloudflare.com",
-}
-
-// 启动时预热连接池
-for _, cdn := range commonCDNs {
-    go warmupConnection(cdn)
+// 建议：流式处理图片转换
+func (h *Handler) convertToWebPStream(src io.Reader, dst io.Writer) error {
+    // 使用流式解码和编码
+    // 避免全量读入内存
 }
 ```
 
-## 测试和验证
+## 监控建议
 
-### 1. 测试下载速度
+### 1. 关键指标监控
+- **内存使用率**：`runtime.MemStats`
+- **Goroutine 数量**：`runtime.NumGoroutine()`
+- **文件描述符使用**：`/proc/self/fd`
+- **硬盘 I/O**：`iostat` 或 `/proc/diskstats`
 
-```bash
-# 测试代理下载速度
-time curl -o /dev/null "https://your-proxy.com/cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"
+### 2. 告警阈值
+- 内存使用率 > 80%
+- Goroutine 数量 > 1000
+- 文件描述符 > 80% 限制
+- 硬盘 I/O 等待时间 > 100ms
 
-# 测试直接下载速度
-time curl -o /dev/null "https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"
+### 3. 日志监控
+```go
+// 建议：添加性能日志
+log.Printf("memory: %dMB, goroutines: %d, cache_size: %dMB", 
+    memStats.Alloc/1024/1024,
+    runtime.NumGoroutine(),
+    cacheSize/1024/1024)
 ```
 
-### 2. 测试 Range 请求
+## 应急处理
 
+### 1. 内存泄漏处理
 ```bash
-# 测试分段下载
-curl -I -H "Range: bytes=0-1023" "https://your-proxy.com/cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"
+# 重启服务
+systemctl restart cdnproxy
 
-# 应该返回：
-# HTTP/1.1 206 Partial Content
-# Accept-Ranges: bytes
-# Content-Range: bytes 0-1023/xxxxx
+# 清理缓存
+rm -rf /data/cache/*
+
+# 监控内存
+watch -n 1 'ps aux | grep cdnproxy'
 ```
 
-### 3. 压力测试
-
+### 2. 硬盘空间不足
 ```bash
-# 使用 ab (Apache Bench)
-ab -n 1000 -c 10 "https://your-proxy.com/cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"
+# 清理过期缓存
+find /data/cache -name "*.cache" -mtime +1 -delete
 
-# 使用 wrk
-wrk -t4 -c100 -d30s "https://your-proxy.com/..."
+# 压缩日志
+gzip /var/log/cdnproxy/*.log
 ```
 
-## 监控指标
+## 测试建议
 
-关键指标：
+### 1. 压力测试
+```bash
+# 使用 ab 进行压力测试
+ab -n 1000 -c 50 http://localhost:8080/cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js
 
-1. **TTFB (Time To First Byte)**：首字节时间
-2. **下载速度**：MB/s
-3. **成功率**：200 状态码比例
-4. **缓存命中率**：从 Redis 返回的比例
-5. **上游延迟**：到 CDN 的延迟
+# 使用 wrk 进行长时间测试
+wrk -t12 -c400 -d30s http://localhost:8080/cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js
+```
+
+### 2. 内存泄漏测试
+```bash
+# 使用 pprof 分析内存
+go tool pprof http://localhost:8080/debug/pprof/heap
+```
 
 ## 总结
 
-**最重要的优化：选择正确的部署位置！**
+当前项目在高并发和大文件场景下确实存在内存和 I/O 风险。建议：
 
-代码层面的优化只能提升 10-50%，但部署位置的优化可以提升 10-100 倍。
+1. **立即优化**：降低小文件处理阈值，增加并发限制
+2. **中期优化**：实现流式处理，减少内存分配
+3. **长期优化**：添加监控和自动恢复机制
 
-如果你的用户在中国：
-1. ✅ 部署到亚洲或中国
-2. ✅ 使用国内 CDN 镜像
-3. ✅ 启用 BBR 拥塞控制
-4. ❌ 不要部署在美国/欧洲
-
+通过以上优化，可以显著降低资源消耗风险。

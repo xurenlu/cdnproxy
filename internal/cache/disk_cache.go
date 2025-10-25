@@ -6,16 +6,19 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 // DiskCache 硬盘缓存，用于存储大文件
 type DiskCache struct {
 	basePath string
-	maxSize  int64 // 最大文件大小（字节）
+	maxSize  int64        // 最大文件大小（字节）
+	mu       sync.RWMutex // 读写锁保护并发访问
 }
 
 // NewDiskCache 创建硬盘缓存实例
@@ -26,11 +29,15 @@ func NewDiskCache(basePath string, maxSize int64) (*DiskCache, error) {
 	return &DiskCache{
 		basePath: basePath,
 		maxSize:  maxSize,
+		mu:       sync.RWMutex{},
 	}, nil
 }
 
 // Get 从硬盘缓存获取文件
 func (d *DiskCache) Get(ctx context.Context, key string) (*Entry, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
 	filePath := d.getFilePath(key)
 
 	// 检查文件是否存在
@@ -64,6 +71,8 @@ func (d *DiskCache) Get(ctx context.Context, key string) (*Entry, error) {
 
 // Set 将文件存储到硬盘缓存
 func (d *DiskCache) Set(ctx context.Context, key string, entry *Entry, ttl time.Duration) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	// 检查文件大小
 	if int64(len(entry.Body)) > d.maxSize {
 		return errors.New("file too large for disk cache")
@@ -94,6 +103,8 @@ func (d *DiskCache) Set(ctx context.Context, key string, entry *Entry, ttl time.
 
 // Delete 删除硬盘缓存文件
 func (d *DiskCache) Delete(ctx context.Context, key string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	filePath := d.getFilePath(key)
 	return os.Remove(filePath)
 }
@@ -113,7 +124,10 @@ func (d *DiskCache) getFilePath(key string) string {
 
 // Cleanup 清理过期的硬盘缓存文件
 func (d *DiskCache) Cleanup(ctx context.Context) error {
-	return filepath.Walk(d.basePath, func(path string, info os.FileInfo, err error) error {
+	var filesToDelete []string
+
+	// 收集需要删除的文件
+	err := filepath.Walk(d.basePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -125,9 +139,25 @@ func (d *DiskCache) Cleanup(ctx context.Context) error {
 
 		// 检查文件修改时间
 		if time.Since(info.ModTime()) > 24*time.Hour {
-			return os.Remove(path)
+			filesToDelete = append(filesToDelete, path)
 		}
 
 		return nil
 	})
+
+	if err != nil {
+		return err
+	}
+
+	// 批量删除文件
+	for _, file := range filesToDelete {
+		d.mu.Lock()
+		if err := os.Remove(file); err != nil {
+			// 记录删除失败的文件，但不中断批量删除
+			log.Printf("Failed to delete cache file %s: %v", file, err)
+		}
+		d.mu.Unlock()
+	}
+
+	return nil
 }

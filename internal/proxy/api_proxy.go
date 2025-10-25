@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -35,10 +36,10 @@ func (h *Handler) proxyAPIRequest(w http.ResponseWriter, r *http.Request, upstre
 		req.Header.Set("User-Agent", "cdnproxy/2.0")
 	}
 
-	// 使用专门的 HTTP 客户端（无超时限制，支持长连接）
+	// 使用专门的 HTTP 客户端（长超时，支持长连接）
 	client := &http.Client{
 		Transport: h.httpClient.Transport,
-		Timeout:   0, // 无超时限制
+		Timeout:   5 * time.Minute, // 5分钟超时，防止永久挂起
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse // 不自动跟随重定向
 		},
@@ -77,6 +78,15 @@ func (h *Handler) proxyAPIRequest(w http.ResponseWriter, r *http.Request, upstre
 
 // proxyWebSocket 处理 WebSocket 连接
 func (h *Handler) proxyWebSocket(w http.ResponseWriter, r *http.Request, upstreamURL string) {
+	// 获取WebSocket信号量
+	select {
+	case h.wsSemaphore <- struct{}{}:
+		defer func() { <-h.wsSemaphore }()
+	case <-r.Context().Done():
+		http.Error(w, "too many websocket connections", http.StatusServiceUnavailable)
+		return
+	}
+
 	// 添加超时控制
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
@@ -189,6 +199,9 @@ func (h *Handler) dialUpstreamWithTimeout(ctx context.Context, wsURL string, req
 	// 如果是 wss，需要 TLS 包装
 	if useTLS {
 		tlsConn := wrapTLS(conn, strings.Split(host, ":")[0])
+		if tlsConn == nil { // 添加nil检查
+			return nil, fmt.Errorf("TLS handshake failed for host: %s", host)
+		}
 		conn = tlsConn
 	}
 

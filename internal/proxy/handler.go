@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"cdnproxy/internal/cache"
@@ -38,6 +39,11 @@ type Handler struct {
 	configStore    ConfigStore
 	counterStore   CounterStore
 	semaphore      chan struct{} // 添加信号量
+	bufferPool     sync.Pool     // 内存池
+	wsSemaphore    chan struct{} // WebSocket并发限制
+	uaCache        sync.Map      // User-Agent解析缓存
+	uaCacheSize    int64         // 缓存大小计数器
+	uaCacheMutex   sync.Mutex    // 缓存大小保护锁
 }
 
 // WhitelistStore 接口定义
@@ -88,7 +94,24 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 		counterStore:   counterStore,
 		httpClient:     &http.Client{Transport: tr, Timeout: 30 * time.Second}, // 添加超时！
 		semaphore:      make(chan struct{}, 50),                                // 最多50个并发
+		wsSemaphore:    make(chan struct{}, 10),                                // 最多10个WebSocket连接
+		bufferPool: sync.Pool{
+			New: func() interface{} {
+				buf := make([]byte, 64*1024) // 64KB 缓冲区
+				return &buf
+			},
+		},
 	}
+}
+
+// getBuffer 从内存池获取缓冲区
+func (h *Handler) getBuffer() []byte {
+	return *h.bufferPool.Get().(*[]byte)
+}
+
+// putBuffer 将缓冲区归还到内存池
+func (h *Handler) putBuffer(buf []byte) {
+	h.bufferPool.Put(&buf)
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -253,8 +276,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cacheControl := cache.GetCacheControlByContentType(contentType)
 	w.Header().Set("Cache-Control", cacheControl)
 
-	// 定义大文件阈值（5MB），大于此值的文件使用流式传输
-	const largeFileThreshold = 5 * 1024 * 1024
+	// 定义大文件阈值（1MB），大于此值的文件使用流式传输
+	const largeFileThreshold = 1 * 1024 * 1024
 
 	var body []byte
 	if method == http.MethodGet {
@@ -304,8 +327,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if contentEncoding == "gzip" {
 			gzReader, err := gzip.NewReader(bytes.NewReader(body))
 			if err == nil {
+				defer gzReader.Close() // 确保关闭
 				decompressed, err := io.ReadAll(gzReader)
-				gzReader.Close()
 				if err == nil {
 					body = decompressed
 				}
@@ -533,6 +556,24 @@ func (h *Handler) compressBody(body []byte, acceptEncoding string) ([]byte, stri
 	return body, ""
 }
 
+// storeUACache 存储User-Agent缓存，限制大小防止内存泄漏
+func (h *Handler) storeUACache(key string, value bool) {
+	const maxCacheSize = 10000 // 最多缓存10000个User-Agent
+
+	h.uaCacheMutex.Lock()
+	defer h.uaCacheMutex.Unlock()
+
+	// 如果缓存已满，清空缓存
+	if h.uaCacheSize >= maxCacheSize {
+		log.Printf("UA cache size limit reached (%d), clearing cache", maxCacheSize)
+		h.uaCache = sync.Map{}
+		h.uaCacheSize = 0
+	}
+
+	h.uaCache.Store(key, value)
+	h.uaCacheSize++
+}
+
 // shouldConvertToWebP 判断是否应该转换为WebP格式
 func (h *Handler) shouldConvertToWebP(contentType, userAgent, acceptHeader string) bool {
 	// 只处理图片类型
@@ -540,19 +581,29 @@ func (h *Handler) shouldConvertToWebP(contentType, userAgent, acceptHeader strin
 		return false
 	}
 
+	// 检查User-Agent缓存
+	cacheKey := userAgent + "|" + acceptHeader
+	if cached, ok := h.uaCache.Load(cacheKey); ok {
+		return cached.(bool)
+	}
+
 	// 检查User-Agent是否支持WebP（主要判断依据）
 	userAgent = strings.ToLower(userAgent)
 
 	// Chrome/Chromium 23+ 支持WebP
 	if strings.Contains(userAgent, "chrome") && !strings.Contains(userAgent, "edg") {
-		return true
+		result := true
+		h.storeUACache(cacheKey, result)
+		return result
 	}
 
 	// Firefox 65+ 支持WebP (2019年1月发布)
 	if strings.Contains(userAgent, "firefox") {
 		// 提取Firefox版本号进行更精确的判断
 		if version := h.extractFirefoxVersion(userAgent); version >= 65 {
-			return true
+			result := true
+			h.storeUACache(cacheKey, result)
+			return result
 		}
 	}
 
@@ -560,27 +611,37 @@ func (h *Handler) shouldConvertToWebP(contentType, userAgent, acceptHeader strin
 	if strings.Contains(userAgent, "safari") && !strings.Contains(userAgent, "chrome") {
 		// 提取Safari版本号
 		if version := h.extractSafariVersion(userAgent); version >= 14 {
-			return true
+			result := true
+			h.storeUACache(cacheKey, result)
+			return result
 		}
 	}
 
 	// Edge 18+ 支持WebP (2018年10月发布)
 	if strings.Contains(userAgent, "edg") {
-		return true
+		result := true
+		h.storeUACache(cacheKey, result)
+		return result
 	}
 
 	// Opera 12+ 支持WebP
 	if strings.Contains(userAgent, "opr") || strings.Contains(userAgent, "opera") {
-		return true
+		result := true
+		h.storeUACache(cacheKey, result)
+		return result
 	}
 
 	// 如果User-Agent不支持，但Accept头明确支持WebP，也可以转换
 	// 这适用于一些API客户端或特殊工具
 	if strings.Contains(acceptHeader, "image/webp") {
-		return true
+		result := true
+		h.storeUACache(cacheKey, result)
+		return result
 	}
 
-	return false
+	result := false
+	h.storeUACache(cacheKey, result)
+	return result
 }
 
 // extractFirefoxVersion 提取Firefox版本号
@@ -656,6 +717,15 @@ func (h *Handler) convertToWebP(body []byte, contentType string) ([]byte, error)
 	img, _, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode image: %v", err)
+	}
+
+	// 检查图片尺寸，防止内存占用过大
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	const maxPixels = 4096 * 4096 // 最大16M像素
+	if width*height > maxPixels {
+		return nil, fmt.Errorf("image too large: %dx%d pixels", width, height)
 	}
 
 	// 转换为WebP格式

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -49,6 +51,9 @@ func main() {
 
 	// 启动定期清理过期缓存
 	go cleanupCache(diskCache)
+
+	// 启动定期资源监控
+	go monitorResources()
 
 	adminServer, err := admin.NewServer(cfg, whitelistStore, configStore)
 	if err != nil {
@@ -105,10 +110,33 @@ func cleanupCache(diskCache *cache.DiskCache) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
+	cleaning := false
+	var cleanMutex sync.Mutex
+
 	for range ticker.C {
-		if err := diskCache.Cleanup(context.Background()); err != nil {
-			log.Printf("cache cleanup error: %v", err)
+		// 检查是否已有清理任务在运行
+		cleanMutex.Lock()
+		if cleaning {
+			log.Printf("Previous cleanup still running, skipping this round")
+			cleanMutex.Unlock()
+			continue
 		}
+		cleaning = true
+		cleanMutex.Unlock()
+
+		// 异步清理，避免阻塞主流程
+		go func() {
+			defer func() {
+				cleanMutex.Lock()
+				cleaning = false
+				cleanMutex.Unlock()
+			}()
+
+			time.Sleep(5 * time.Minute) // 延迟清理，避免与高峰期冲突
+			if err := diskCache.Cleanup(context.Background()); err != nil {
+				log.Printf("cache cleanup error: %v", err)
+			}
+		}()
 	}
 }
 
@@ -137,4 +165,37 @@ func setFDLimit(limit int) error {
 	rLimit.Cur = uint64(limit)
 	rLimit.Max = uint64(limit)
 	return syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+}
+
+// monitorResources 定期监控资源使用情况
+func monitorResources() {
+	ticker := time.NewTicker(30 * time.Second) // 每30秒检查一次
+	defer ticker.Stop()
+
+	const (
+		MaxMemoryMB   = 512
+		MaxGoroutines = 1000
+	)
+
+	for range ticker.C {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+
+		goroutines := runtime.NumGoroutine()
+
+		// 记录性能指标
+		log.Printf("MONITOR: memory=%dMB, goroutines=%d, sys=%dMB",
+			m.Alloc/1024/1024,
+			goroutines,
+			m.Sys/1024/1024)
+
+		// 检查资源使用限制
+		if m.Alloc/1024/1024 > MaxMemoryMB {
+			log.Printf("WARNING: Memory usage too high: %dMB (limit: %dMB)", m.Alloc/1024/1024, MaxMemoryMB)
+		}
+
+		if goroutines > MaxGoroutines {
+			log.Printf("WARNING: Too many goroutines: %d (limit: %d)", goroutines, MaxGoroutines)
+		}
+	}
 }
