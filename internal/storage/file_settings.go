@@ -3,6 +3,8 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,7 +75,12 @@ func (s *FileConfigStore) save() error {
 		return err
 	}
 
-	return os.WriteFile(s.filePath, data, 0644)
+	// 原子写入：先写临时文件，再重命名
+	tempFile := s.filePath + ".tmp"
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tempFile, s.filePath)
 }
 
 func (s *FileConfigStore) GetReferrerThreshold(ctx context.Context) (int64, error) {
@@ -99,6 +106,8 @@ type FileCounterStore struct {
 	filePath string
 	mu       sync.RWMutex
 	counters map[string]*counterEntry
+	dirty    bool          // 标记是否有未保存的更改
+	stopCh   chan struct{} // 用于停止后台goroutine
 }
 
 type counterEntry struct {
@@ -114,6 +123,8 @@ func NewFileCounterStore(dataDir string) (*FileCounterStore, error) {
 	store := &FileCounterStore{
 		filePath: filepath.Join(dataDir, "counters.json"),
 		counters: make(map[string]*counterEntry),
+		dirty:    false,
+		stopCh:   make(chan struct{}),
 	}
 
 	// 加载现有数据
@@ -121,8 +132,8 @@ func NewFileCounterStore(dataDir string) (*FileCounterStore, error) {
 		return nil, err
 	}
 
-	// 启动清理过期数据的 goroutine
-	go store.cleanupExpired()
+	// 启动后台工作协程
+	go store.backgroundWorker()
 
 	return store, nil
 }
@@ -161,7 +172,12 @@ func (s *FileCounterStore) save() error {
 		return err
 	}
 
-	return os.WriteFile(s.filePath, data, 0644)
+	// 原子写入：先写临时文件，再重命名
+	tempFile := s.filePath + ".tmp"
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tempFile, s.filePath)
 }
 
 func (s *FileCounterStore) IncrementReferrerCount(ctx context.Context, host string) (int64, error) {
@@ -172,6 +188,26 @@ func (s *FileCounterStore) IncrementReferrerCount(ctx context.Context, host stri
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// 防止恶意请求导致map无限增长
+	const maxCounters = 100000 // 最多10万个不同的host
+	if len(s.counters) >= maxCounters {
+		// 清理过期条目
+		now := time.Now()
+		cleaned := 0
+		for h, e := range s.counters {
+			if now.After(e.ExpiresAt) {
+				delete(s.counters, h)
+				cleaned++
+			}
+		}
+		log.Printf("Counter store reached limit (%d), cleaned %d expired entries", maxCounters, cleaned)
+
+		// 如果清理后还是太多，拒绝新增
+		if len(s.counters) >= maxCounters {
+			return 0, errors.New("counter store full")
+		}
+	}
 
 	now := time.Now()
 	entry, exists := s.counters[host]
@@ -187,34 +223,57 @@ func (s *FileCounterStore) IncrementReferrerCount(ctx context.Context, host stri
 		entry.Count++
 	}
 
-	// 每10次增量保存一次，减少IO
-	if entry.Count%10 == 0 {
-		_ = s.save()
-	}
+	s.dirty = true // 标记为脏数据，由后台异步保存
 
 	return entry.Count, nil
 }
 
-func (s *FileCounterStore) cleanupExpired() {
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
+// backgroundWorker 后台工作协程：定期清理过期数据和异步保存
+func (s *FileCounterStore) backgroundWorker() {
+	cleanupTicker := time.NewTicker(1 * time.Hour) // 清理过期计数器
+	saveTicker := time.NewTicker(10 * time.Second) // 定期保存脏数据（计数器更新频繁，10秒保存一次）
+	defer cleanupTicker.Stop()
+	defer saveTicker.Stop()
 
-	for range ticker.C {
-		s.mu.Lock()
-		now := time.Now()
-		changed := false
-
-		for host, entry := range s.counters {
-			if now.After(entry.ExpiresAt) {
-				delete(s.counters, host)
-				changed = true
+	for {
+		select {
+		case <-s.stopCh:
+			// 收到停止信号，保存最后的数据并退出
+			s.mu.Lock()
+			if s.dirty {
+				_ = s.save()
 			}
-		}
+			s.mu.Unlock()
+			return
 
-		if changed {
-			_ = s.save()
+		case <-cleanupTicker.C:
+			// 清理过期计数器
+			s.mu.Lock()
+			now := time.Now()
+			for host, entry := range s.counters {
+				if now.After(entry.ExpiresAt) {
+					delete(s.counters, host)
+					s.dirty = true
+				}
+			}
+			s.mu.Unlock()
+
+		case <-saveTicker.C:
+			// 定期保存脏数据
+			s.mu.Lock()
+			if s.dirty {
+				if err := s.save(); err == nil {
+					s.dirty = false
+				}
+			}
+			s.mu.Unlock()
 		}
-		s.mu.Unlock()
 	}
 }
 
+// Close 停止后台goroutine并保存数据
+func (s *FileCounterStore) Close() error {
+	close(s.stopCh)
+	time.Sleep(100 * time.Millisecond) // 等待goroutine退出
+	return nil
+}

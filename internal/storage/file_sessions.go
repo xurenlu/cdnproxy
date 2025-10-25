@@ -14,6 +14,8 @@ type FileSessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*sessionData
 	ttl      time.Duration
+	dirty    bool          // 标记是否有未保存的更改
+	stopCh   chan struct{} // 用于停止后台goroutine
 }
 
 type sessionData struct {
@@ -30,6 +32,8 @@ func NewFileSessionStore(dataDir string, ttl time.Duration) (*FileSessionStore, 
 		filePath: filepath.Join(dataDir, "sessions.json"),
 		sessions: make(map[string]*sessionData),
 		ttl:      ttl,
+		dirty:    false,
+		stopCh:   make(chan struct{}),
 	}
 
 	// 加载现有数据
@@ -37,8 +41,8 @@ func NewFileSessionStore(dataDir string, ttl time.Duration) (*FileSessionStore, 
 		return nil, err
 	}
 
-	// 启动清理过期会话的 goroutine
-	go store.cleanupExpired()
+	// 启动定期清理过期会话和异步保存的 goroutine
+	go store.backgroundWorker()
 
 	return store, nil
 }
@@ -77,7 +81,12 @@ func (s *FileSessionStore) save() error {
 		return err
 	}
 
-	return os.WriteFile(s.filePath, data, 0644)
+	// 原子写入：先写临时文件，再重命名
+	tempFile := s.filePath + ".tmp"
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tempFile, s.filePath)
 }
 
 // Set 创建或更新会话
@@ -89,8 +98,9 @@ func (s *FileSessionStore) Set(token, value string) error {
 		Value:     value,
 		ExpiresAt: time.Now().Add(s.ttl),
 	}
+	s.dirty = true // 标记为脏数据，等待后台异步保存
 
-	return s.save()
+	return nil
 }
 
 // Exists 检查会话是否存在且未过期
@@ -112,29 +122,57 @@ func (s *FileSessionStore) Delete(token string) error {
 	defer s.mu.Unlock()
 
 	delete(s.sessions, token)
-	return s.save()
+	s.dirty = true // 标记为脏数据
+
+	return nil
 }
 
-func (s *FileSessionStore) cleanupExpired() {
-	ticker := time.NewTicker(10 * time.Minute)
-	defer ticker.Stop()
+// backgroundWorker 后台工作协程：定期清理过期数据和异步保存
+func (s *FileSessionStore) backgroundWorker() {
+	cleanupTicker := time.NewTicker(10 * time.Minute) // 清理过期会话
+	saveTicker := time.NewTicker(5 * time.Second)     // 定期保存脏数据
+	defer cleanupTicker.Stop()
+	defer saveTicker.Stop()
 
-	for range ticker.C {
-		s.mu.Lock()
-		now := time.Now()
-		changed := false
-
-		for token, session := range s.sessions {
-			if now.After(session.ExpiresAt) {
-				delete(s.sessions, token)
-				changed = true
+	for {
+		select {
+		case <-s.stopCh:
+			// 收到停止信号，保存最后的数据并退出
+			s.mu.Lock()
+			if s.dirty {
+				_ = s.save()
 			}
-		}
+			s.mu.Unlock()
+			return
 
-		if changed {
-			_ = s.save()
+		case <-cleanupTicker.C:
+			// 清理过期会话
+			s.mu.Lock()
+			now := time.Now()
+			for token, session := range s.sessions {
+				if now.After(session.ExpiresAt) {
+					delete(s.sessions, token)
+					s.dirty = true
+				}
+			}
+			s.mu.Unlock()
+
+		case <-saveTicker.C:
+			// 定期保存脏数据
+			s.mu.Lock()
+			if s.dirty {
+				if err := s.save(); err == nil {
+					s.dirty = false
+				}
+			}
+			s.mu.Unlock()
 		}
-		s.mu.Unlock()
 	}
 }
 
+// Close 停止后台goroutine并保存数据
+func (s *FileSessionStore) Close() error {
+	close(s.stopCh)
+	time.Sleep(100 * time.Millisecond) // 等待goroutine退出
+	return nil
+}

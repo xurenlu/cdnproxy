@@ -41,6 +41,7 @@ type Handler struct {
 	semaphore      chan struct{} // 添加信号量
 	bufferPool     sync.Pool     // 内存池
 	wsSemaphore    chan struct{} // WebSocket并发限制
+	webpSemaphore  chan struct{} // WebP转换并发限制
 	uaCache        sync.Map      // User-Agent解析缓存
 	uaCacheSize    int64         // 缓存大小计数器
 	uaCacheMutex   sync.Mutex    // 缓存大小保护锁
@@ -95,6 +96,7 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 		httpClient:     &http.Client{Transport: tr, Timeout: 30 * time.Second}, // 添加超时！
 		semaphore:      make(chan struct{}, 50),                                // 最多50个并发
 		wsSemaphore:    make(chan struct{}, 10),                                // 最多10个WebSocket连接
+		webpSemaphore:  make(chan struct{}, 5),                                 // 最多5个WebP转换并发（CPU密集）
 		bufferPool: sync.Pool{
 			New: func() interface{} {
 				buf := make([]byte, 64*1024) // 64KB 缓冲区
@@ -305,8 +307,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 小文件才读入内存进行处理和缓存
+		// 限制读取大小，防止OOM
+		limitedReader := io.LimitReader(resp.Body, largeFileThreshold)
 		var errCopy error
-		body, errCopy = io.ReadAll(resp.Body)
+		body, errCopy = io.ReadAll(limitedReader)
 		if errCopy != nil {
 			// stream directly if readAll fails
 			resp.Body.Close()
@@ -339,11 +343,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		userAgent := r.Header.Get("User-Agent")
 		acceptHeader := r.Header.Get("Accept")
 		if h.shouldConvertToWebP(contentType, userAgent, acceptHeader) {
-			webpBody, err := h.convertToWebP(body, contentType)
-			if err == nil && len(webpBody) > 0 {
-				body = webpBody
-				contentType = "image/webp"
-				w.Header().Set("Content-Type", "image/webp")
+			// 使用信号量限制WebP转换并发数
+			select {
+			case h.webpSemaphore <- struct{}{}:
+				webpBody, err := h.convertToWebP(body, contentType)
+				<-h.webpSemaphore // 释放信号量
+				if err == nil && len(webpBody) > 0 {
+					body = webpBody
+					contentType = "image/webp"
+					w.Header().Set("Content-Type", "image/webp")
+				}
+			default:
+				// WebP转换队列已满，跳过转换，直接返回原图
+				log.Printf("WebP conversion queue full, skipping conversion")
 			}
 		}
 
@@ -712,6 +724,13 @@ func (h *Handler) convertToWebP(body []byte, contentType string) ([]byte, error)
 		!strings.Contains(contentType, "image/gif") {
 		return nil, fmt.Errorf("unsupported image type: %s", contentType)
 	}
+
+	// 使用defer recover防止image.Decode panic
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in image decode: %v", r)
+		}
+	}()
 
 	// 解码图片
 	img, _, err := image.Decode(bytes.NewReader(body))

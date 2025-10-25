@@ -65,7 +65,7 @@ func (h *Handler) proxyAPIRequest(w http.ResponseWriter, r *http.Request, upstre
 
 	// 如果是 SSE，使用流式传输
 	if isSSE {
-		h.streamSSE(w, resp.Body)
+		h.streamSSE(w, resp.Body, r.Context())
 		return
 	}
 
@@ -344,9 +344,9 @@ func (h *Handler) dialUpstream(wsURL string, req *http.Request) (net.Conn, error
 }
 
 // streamSSE 流式传输 SSE 响应
-func (h *Handler) streamSSE(w http.ResponseWriter, body io.Reader) {
-	// 添加超时控制
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+func (h *Handler) streamSSE(w http.ResponseWriter, body io.Reader, reqCtx context.Context) {
+	// 使用请求的context，并添加超时控制
+	ctx, cancel := context.WithTimeout(reqCtx, 10*time.Minute)
 	defer cancel()
 
 	// 确保响应可以被 flush

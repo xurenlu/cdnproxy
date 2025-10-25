@@ -44,6 +44,10 @@ func NewServer(cfg config.Config, whitelistStore WhitelistStore, configStore Con
 		return nil, err
 	}
 
+	return NewServerWithSessionStore(cfg, whitelistStore, configStore, sessionStore)
+}
+
+func NewServerWithSessionStore(cfg config.Config, whitelistStore WhitelistStore, configStore ConfigStore, sessionStore *storage.FileSessionStore) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		sessionStore:   sessionStore,

@@ -72,7 +72,12 @@ func (s *FileWhitelistStore) save() error {
 		return err
 	}
 
-	return os.WriteFile(s.filePath, data, 0644)
+	// 原子写入：先写临时文件，再重命名
+	tempFile := s.filePath + ".tmp"
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tempFile, s.filePath)
 }
 
 func (s *FileWhitelistStore) List(ctx context.Context) ([]string, error) {
@@ -125,4 +130,3 @@ func (s *FileWhitelistStore) ContainsAllowedSuffix(ctx context.Context, host str
 	}
 	return false, nil
 }
-

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -73,9 +74,16 @@ func (d *DiskCache) Get(ctx context.Context, key string) (*Entry, error) {
 func (d *DiskCache) Set(ctx context.Context, key string, entry *Entry, ttl time.Duration) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
 	// 检查文件大小
 	if int64(len(entry.Body)) > d.maxSize {
 		return errors.New("file too large for disk cache")
+	}
+
+	// 检查磁盘空间
+	if err := d.checkDiskSpace(); err != nil {
+		log.Printf("Disk space check failed: %v", err)
+		return err
 	}
 
 	filePath := d.getFilePath(key)
@@ -109,6 +117,25 @@ func (d *DiskCache) Delete(ctx context.Context, key string) error {
 	return os.Remove(filePath)
 }
 
+// checkDiskSpace 检查磁盘空间是否充足
+func (d *DiskCache) checkDiskSpace() error {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(d.basePath, &stat); err != nil {
+		return err
+	}
+
+	// 计算可用空间（字节）
+	availableSpace := stat.Bavail * uint64(stat.Bsize)
+
+	// 如果可用空间小于1GB，返回错误
+	const minFreeSpace = 1 * 1024 * 1024 * 1024 // 1GB
+	if availableSpace < minFreeSpace {
+		return errors.New("insufficient disk space")
+	}
+
+	return nil
+}
+
 // getFilePath 根据key生成文件路径
 func (d *DiskCache) getFilePath(key string) string {
 	// 使用key的hash作为文件名，避免路径冲突
@@ -124,9 +151,10 @@ func (d *DiskCache) getFilePath(key string) string {
 
 // Cleanup 清理过期的硬盘缓存文件
 func (d *DiskCache) Cleanup(ctx context.Context) error {
-	var filesToDelete []string
+	// 使用批量删除，避免slice无限增长
+	const batchSize = 100
+	deletedCount := 0
 
-	// 收集需要删除的文件
 	err := filepath.Walk(d.basePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -139,25 +167,31 @@ func (d *DiskCache) Cleanup(ctx context.Context) error {
 
 		// 检查文件修改时间
 		if time.Since(info.ModTime()) > 24*time.Hour {
-			filesToDelete = append(filesToDelete, path)
+			// 立即删除，不累积到slice中
+			d.mu.Lock()
+			if err := os.Remove(path); err != nil {
+				log.Printf("Failed to delete cache file %s: %v", path, err)
+			} else {
+				deletedCount++
+			}
+			d.mu.Unlock()
+
+			// 每删除batchSize个文件，检查一次context
+			if deletedCount%batchSize == 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+			}
 		}
 
 		return nil
 	})
 
-	if err != nil {
-		return err
+	if deletedCount > 0 {
+		log.Printf("Cleanup completed: deleted %d expired cache files", deletedCount)
 	}
 
-	// 批量删除文件
-	for _, file := range filesToDelete {
-		d.mu.Lock()
-		if err := os.Remove(file); err != nil {
-			// 记录删除失败的文件，但不中断批量删除
-			log.Printf("Failed to delete cache file %s: %v", file, err)
-		}
-		d.mu.Unlock()
-	}
-
-	return nil
+	return err
 }

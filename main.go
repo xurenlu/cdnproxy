@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -55,7 +56,12 @@ func main() {
 	// 启动定期资源监控
 	go monitorResources()
 
-	adminServer, err := admin.NewServer(cfg, whitelistStore, configStore)
+	sessionStore, err := storage.NewFileSessionStore(cfg.DataDir, cfg.SessionTTL)
+	if err != nil {
+		log.Fatalf("failed to create session store: %v", err)
+	}
+
+	adminServer, err := admin.NewServerWithSessionStore(cfg, whitelistStore, configStore, sessionStore)
 	if err != nil {
 		log.Fatalf("failed to create admin server: %v", err)
 	}
@@ -69,6 +75,21 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	// Metrics endpoint
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(fmt.Sprintf(
+			"# CDNProxy Metrics\n"+
+				"memory_alloc_bytes %d\n"+
+				"memory_sys_bytes %d\n"+
+				"goroutines_count %d\n"+
+				"gc_runs_total %d\n",
+			m.Alloc, m.Sys, runtime.NumGoroutine(), m.NumGC,
+		)))
+	})
+
 	// Docs page
 	mux.HandleFunc("/docs", docs.Handler())
 
@@ -80,7 +101,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           loggingMiddleware(mux),
+		Handler:           panicRecoveryMiddleware(loggingMiddleware(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second, // 添加读取超时
 		WriteTimeout:      30 * time.Second, // 添加写入超时
@@ -99,11 +120,30 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 	log.Println("shutting down...")
+
+	// 创建关闭上下文
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	// 关闭HTTP服务器
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("server shutdown error: %v", err)
 	}
+
+	// 关闭storage层，确保数据保存
+	log.Println("closing storage layers...")
+	if closer, ok := interface{}(sessionStore).(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil {
+			log.Printf("session store close error: %v", err)
+		}
+	}
+	if closer, ok := interface{}(counterStore).(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil {
+			log.Printf("counter store close error: %v", err)
+		}
+	}
+
+	log.Println("shutdown complete")
 }
 
 func cleanupCache(diskCache *cache.DiskCache) {
@@ -138,6 +178,20 @@ func cleanupCache(diskCache *cache.DiskCache) {
 			}
 		}()
 	}
+}
+
+// panicRecoveryMiddleware 捕获panic防止服务崩溃
+func panicRecoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Printf("PANIC RECOVERED: %v\nRequest: %s %s\nUser-Agent: %s",
+					err, r.Method, r.URL.Path, r.UserAgent())
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {
