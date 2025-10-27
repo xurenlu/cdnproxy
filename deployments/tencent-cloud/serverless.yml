@@ -1,0 +1,44 @@
+# 腾讯云函数部署配置
+service: cdnproxy
+provider:
+  name: tencent
+  runtime: go1.x
+  region: ap-beijing
+  memorySize: 512
+  timeout: 30
+  environment:
+    SERVERLESS_PLATFORM: tencent
+    CACHE_DIR: /tmp/cache
+    DATA_DIR: /tmp/data
+    CACHE_TTL_SECONDS: 43200
+    ADMIN_USERNAME: admin
+    ADMIN_PASSWORD: ${env:ADMIN_PASSWORD}
+
+functions:
+  cdnproxy:
+    handler: main.TencentCloudMain
+    events:
+      - http:
+          path: /{proxy+}
+          method: ANY
+          cors: true
+    environment:
+      MEMORY_SIZE: 512
+      TIMEOUT: 30
+
+plugins:
+  - serverless-tencent-scf
+
+custom:
+  tencent:
+    region: ap-beijing
+    functionName: cdnproxy
+    runtime: Go1.x
+    handler: main.TencentCloudMain
+    memorySize: 512
+    timeout: 30
+    environment:
+      variables:
+        SERVERLESS_PLATFORM: tencent
+        CACHE_DIR: /tmp/cache
+        DATA_DIR: /tmp/data
