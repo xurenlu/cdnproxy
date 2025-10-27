@@ -21,6 +21,7 @@ import (
 
 	"cdnproxy/internal/cache"
 	"cdnproxy/internal/config"
+	"cdnproxy/internal/metrics"
 
 	"github.com/chai2010/webp"
 )
@@ -126,8 +127,10 @@ func (h *Handler) putBuffer(buf []byte) {
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	success := false
 	defer func() {
 		duration := time.Since(start)
+		metrics.GetGlobalMetrics().RecordRequest(success, duration)
 		if duration > 5*time.Second {
 			log.Printf("SLOW REQUEST: %s %s %s", r.Method, r.URL.Path, duration)
 		}
@@ -153,6 +156,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.isAPIDomain(upstreamURL) {
 		// API 代理不需要访问控制检查（由上游 API 服务自己控制）
 		h.proxyAPIRequest(w, r, upstreamURL)
+		success = true
 		return
 	}
 
@@ -174,6 +178,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 为缓存生成键
 	key := buildCacheKey(method, upstreamURL)
 	if e, _ := h.cache.Get(r.Context(), key); e != nil {
+		metrics.GetGlobalMetrics().RecordCacheHit()
 		// 设置优化的Cache-Control头
 		contentType := e.ContentType
 		if contentType == "" {
@@ -207,8 +212,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if method == http.MethodGet && len(body) > 0 {
 			_, _ = w.Write(body)
 		}
+		success = true
 		return
 	}
+
+	// 记录缓存未命中
+	metrics.GetGlobalMetrics().RecordCacheMiss()
 
 	// Fetch upstream
 	req, err := http.NewRequestWithContext(r.Context(), method, upstreamURL, nil)

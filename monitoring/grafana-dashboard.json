@@ -1,0 +1,148 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "CDNProxy 性能监控",
+    "tags": ["cdnproxy", "performance"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "请求统计",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "total_requests",
+            "legendFormat": "总请求数"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "成功率",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "success_rate",
+            "legendFormat": "成功率 %"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "缓存命中率",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "cache_hit_rate",
+            "legendFormat": "缓存命中率 %"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "平均响应时间",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "avg_response_time_ms",
+            "legendFormat": "平均响应时间 ms"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}
+      },
+      {
+        "id": 5,
+        "title": "内存使用",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "memory_alloc_bytes",
+            "legendFormat": "已分配内存"
+          },
+          {
+            "expr": "memory_sys_bytes",
+            "legendFormat": "系统内存"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 6,
+        "title": "Goroutine 数量",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "goroutines_count",
+            "legendFormat": "Goroutine 数量"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 7,
+        "title": "请求趋势",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(total_requests[5m])",
+            "legendFormat": "请求速率"
+          },
+          {
+            "expr": "rate(successful_requests[5m])",
+            "legendFormat": "成功请求速率"
+          },
+          {
+            "expr": "rate(failed_requests[5m])",
+            "legendFormat": "失败请求速率"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+      },
+      {
+        "id": 8,
+        "title": "缓存性能",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(cache_hits[5m])",
+            "legendFormat": "缓存命中速率"
+          },
+          {
+            "expr": "rate(cache_misses[5m])",
+            "legendFormat": "缓存未命中速率"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+      },
+      {
+        "id": 9,
+        "title": "响应时间分布",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg_response_time_ms",
+            "legendFormat": "平均响应时间"
+          },
+          {
+            "expr": "min_response_time_ms",
+            "legendFormat": "最小响应时间"
+          },
+          {
+            "expr": "max_response_time_ms",
+            "legendFormat": "最大响应时间"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "5s"
+  }
+}

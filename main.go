@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"cdnproxy/internal/cache"
 	"cdnproxy/internal/config"
 	"cdnproxy/internal/docs"
+	"cdnproxy/internal/metrics"
 	"cdnproxy/internal/proxy"
 	"cdnproxy/internal/storage"
 )
@@ -100,14 +102,66 @@ func main() {
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
+		
+		// 获取应用指标
+		appMetrics := metrics.GetGlobalMetrics().GetStats()
+		
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte(fmt.Sprintf(
 			"# CDNProxy Metrics\n"+
+				"# System Metrics\n"+
 				"memory_alloc_bytes %d\n"+
 				"memory_sys_bytes %d\n"+
 				"goroutines_count %d\n"+
-				"gc_runs_total %d\n",
+				"gc_runs_total %d\n"+
+				"# Application Metrics\n"+
+				"total_requests %v\n"+
+				"successful_requests %v\n"+
+				"failed_requests %v\n"+
+				"success_rate %v\n"+
+				"avg_response_time_ms %v\n"+
+				"cache_hits %v\n"+
+				"cache_misses %v\n"+
+				"cache_hit_rate %v\n"+
+				"active_connections %v\n"+
+				"max_concurrent %v\n"+
+				"uptime_seconds %v\n",
 			m.Alloc, m.Sys, runtime.NumGoroutine(), m.NumGC,
+			appMetrics["total_requests"],
+			appMetrics["successful_requests"],
+			appMetrics["failed_requests"],
+			appMetrics["success_rate"],
+			appMetrics["avg_response_time_ms"],
+			appMetrics["cache_hits"],
+			appMetrics["cache_misses"],
+			appMetrics["cache_hit_rate"],
+			appMetrics["active_connections"],
+			appMetrics["max_concurrent"],
+			appMetrics["uptime_seconds"],
+		)))
+	})
+
+	// 详细统计端点
+	mux.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		
+		appMetrics := metrics.GetGlobalMetrics().GetStats()
+		
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
+			"system": {
+				"memory_alloc_mb": %d,
+				"memory_sys_mb": %d,
+				"goroutines": %d,
+				"gc_runs": %d
+			},
+			"application": %s,
+			"timestamp": "%s"
+		}`, 
+			m.Alloc/1024/1024, m.Sys/1024/1024, runtime.NumGoroutine(), m.NumGC,
+			toJSON(appMetrics),
+			time.Now().Format(time.RFC3339),
 		)))
 	})
 
@@ -177,6 +231,15 @@ type logResponseWriter struct {
 func (lrw *logResponseWriter) WriteHeader(code int) {
 	lrw.statusCode = code
 	lrw.ResponseWriter.WriteHeader(code)
+}
+
+// toJSON 将 map 转换为 JSON 字符串
+func toJSON(data map[string]interface{}) string {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return "{}"
+	}
+	return string(jsonData)
 }
 
 // setFDLimit 设置文件描述符限制
