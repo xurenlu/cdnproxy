@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	
+	"cdnproxy/internal/proxy/providers"
 )
 
 // AIAPIProxy AI API代理处理器
@@ -31,7 +33,7 @@ func NewAIAPIProxy(proxyManager *ResidentialProxyManager) *AIAPIProxy {
 func (aap *AIAPIProxy) ProxyAIRequest(w http.ResponseWriter, r *http.Request, upstreamURL string) error {
 	// 检测目标API类型
 	apiType := aap.detectAPIType(upstreamURL)
-	
+
 	// 获取最佳住宅IP代理
 	proxy, err := aap.proxyManager.GetBestProxy(r.Context(), apiType)
 	if err != nil {
@@ -95,7 +97,7 @@ func (aap *AIAPIProxy) ProxyAIRequest(w http.ResponseWriter, r *http.Request, up
 // detectAPIType 检测API类型
 func (aap *AIAPIProxy) detectAPIType(upstreamURL string) string {
 	upstreamURL = strings.ToLower(upstreamURL)
-	
+
 	if strings.Contains(upstreamURL, "api.openai.com") {
 		return "openai"
 	}
@@ -108,7 +110,7 @@ func (aap *AIAPIProxy) detectAPIType(upstreamURL string) string {
 	if strings.Contains(upstreamURL, "poe.com") {
 		return "poe"
 	}
-	
+
 	return "default"
 }
 
@@ -163,7 +165,7 @@ func (aap *AIAPIProxy) copyHeaders(dst, src http.Header) {
 }
 
 // addResidentialIPHeaders 添加住宅IP特定的请求头
-func (aap *AIAPIProxy) addResidentialIPHeaders(req *http.Request, proxy *ResidentialProxy) {
+func (aap *AIAPIProxy) addResidentialIPHeaders(req *http.Request, proxy *providers.ResidentialProxy) {
 	// 添加真实浏览器请求头
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
@@ -186,13 +188,13 @@ func (aap *AIAPIProxy) addResidentialIPHeaders(req *http.Request, proxy *Residen
 // GetProxyStats 获取代理统计信息
 func (aap *AIAPIProxy) GetProxyStats() map[string]interface{} {
 	healthStatus := aap.proxyManager.GetHealthStatus()
-	
+
 	stats := map[string]interface{}{
-		"total_proxies": len(healthStatus),
-		"healthy_proxies": 0,
+		"total_proxies":     len(healthStatus),
+		"healthy_proxies":   0,
 		"unhealthy_proxies": 0,
-		"average_latency": 0.0,
-		"providers": make(map[string]interface{}),
+		"average_latency":   0.0,
+		"providers":         make(map[string]interface{}),
 	}
 
 	totalLatency := 0.0

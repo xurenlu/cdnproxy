@@ -10,7 +10,7 @@ echo "========================"
 
 # 检查环境变量
 echo "🔍 检查环境变量..."
-if [ -z "$BRIGHT_DATA_API_KEY" ] && [ -z "$SMARTPROXY_API_KEY" ] && [ -z "$NETNUT_API_KEY" ]; then
+if [ -z "$BRIGHT_DATA_API_KEY" ] && [ -z "$SMARTPROXY_API_KEY" ] && [ -z "$NETNUT_API_KEY" ] && [ -z "$OXYLABS_API_KEY" ] && [ -z "$PROXY_SELLER_API_KEY" ] && [ -z "$YOUPROXY_API_KEY" ]; then
     echo "❌ 错误: 请设置至少一个住宅IP代理提供者的API密钥"
     echo ""
     echo "设置方法:"
@@ -27,6 +27,21 @@ if [ -z "$BRIGHT_DATA_API_KEY" ] && [ -z "$SMARTPROXY_API_KEY" ] && [ -z "$NETNU
     echo "export NETNUT_API_KEY='your_api_key'"
     echo "export NETNUT_USERNAME='your_username'"
     echo "export NETNUT_PASSWORD='your_password'"
+    echo ""
+    echo "或者:"
+    echo "export OXYLABS_API_KEY='your_api_key'"
+    echo "export OXYLABS_USERNAME='your_username'"
+    echo "export OXYLABS_PASSWORD='your_password'"
+    echo ""
+    echo "或者:"
+    echo "export PROXY_SELLER_API_KEY='your_api_key'"
+    echo "export PROXY_SELLER_USERNAME='your_username'"
+    echo "export PROXY_SELLER_PASSWORD='your_password'"
+    echo ""
+    echo "或者:"
+    echo "export YOUPROXY_API_KEY='your_api_key'"
+    echo "export YOUPROXY_USERNAME='your_username'"
+    echo "export YOUPROXY_PASSWORD='your_password'"
     exit 1
 fi
 

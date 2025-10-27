@@ -33,6 +33,36 @@ providers:
     timeout: 30
     max_retries: 3
 
+  # Oxylabs 配置
+  oxylabs:
+    enabled: true
+    api_key: "${OXYLABS_API_KEY}"
+    username: "${OXYLABS_USERNAME}"
+    password: "${OXYLABS_PASSWORD}"
+    base_url: "https://api.oxylabs.io"
+    timeout: 30
+    max_retries: 3
+
+  # Proxy-Seller 配置
+  proxy_seller:
+    enabled: true
+    api_key: "${PROXY_SELLER_API_KEY}"
+    username: "${PROXY_SELLER_USERNAME}"
+    password: "${PROXY_SELLER_PASSWORD}"
+    base_url: "https://api.proxy-seller.com"
+    timeout: 30
+    max_retries: 3
+
+  # Youproxy 配置
+  youproxy:
+    enabled: true
+    api_key: "${YOUPROXY_API_KEY}"
+    username: "${YOUPROXY_USERNAME}"
+    password: "${YOUPROXY_PASSWORD}"
+    base_url: "https://api.youproxy.com"
+    timeout: 30
+    max_retries: 3
+
 # 代理池配置
 proxy_pool:
   # 健康检查配置

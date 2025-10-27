@@ -1,4 +1,4 @@
-// Package proxy 住宅IP代理支持
+// Package proxy 住宅IP代理管理器
 // 作者: rocky<m@some.im>
 
 package proxy
@@ -12,57 +12,15 @@ import (
 	"net/url"
 	"sync"
 	"time"
+	
+	"cdnproxy/internal/proxy/providers"
 )
 
 // ResidentialProxyManager 住宅IP代理管理器
 type ResidentialProxyManager struct {
-	providers map[string]ResidentialProxyProvider
-	mu        sync.RWMutex
+	providers     map[string]providers.ResidentialProxyProvider
+	mu            sync.RWMutex
 	healthChecker *ProxyHealthChecker
-}
-
-// ResidentialProxyProvider 住宅IP代理提供者接口
-type ResidentialProxyProvider interface {
-	// GetProxy 获取一个可用的代理
-	GetProxy(ctx context.Context) (*ResidentialProxy, error)
-	
-	// GetProxyList 获取代理列表
-	GetProxyList(ctx context.Context) ([]*ResidentialProxy, error)
-	
-	// ReportUsage 报告使用情况
-	ReportUsage(proxy *ResidentialProxy, success bool, latency time.Duration) error
-	
-	// GetName 获取提供者名称
-	GetName() string
-	
-	// GetCost 获取成本信息
-	GetCost() *ProxyCost
-}
-
-// ResidentialProxy 住宅IP代理
-type ResidentialProxy struct {
-	ID          string            `json:"id"`
-	IP          string            `json:"ip"`
-	Port        int               `json:"port"`
-	Username    string            `json:"username"`
-	Password    string            `json:"password"`
-	Location    string            `json:"location"`
-	Country     string            `json:"country"`
-	City        string            `json:"city"`
-	ISP         string            `json:"isp"`
-	Type        string            `json:"type"` // residential, mobile, datacenter
-	Quality     int               `json:"quality"` // 1-10
-	SuccessRate float64           `json:"success_rate"`
-	LastUsed    time.Time         `json:"last_used"`
-	Metadata    map[string]string `json:"metadata"`
-}
-
-// ProxyCost 代理成本信息
-type ProxyCost struct {
-	PerRequest float64 `json:"per_request"` // 每次请求成本
-	PerGB      float64 `json:"per_gb"`      // 每GB成本
-	PerHour    float64 `json:"per_hour"`    // 每小时成本
-	Currency   string  `json:"currency"`    // 货币
 }
 
 // ProxyHealthChecker 代理健康检查器
@@ -84,8 +42,12 @@ type HealthResult struct {
 
 // NewResidentialProxyManager 创建住宅IP代理管理器
 func NewResidentialProxyManager() *ResidentialProxyManager {
+	// 创建提供者注册表并注册所有提供者
+	registry := providers.NewProviderRegistry()
+	registry.RegisterAllProviders()
+	
 	return &ResidentialProxyManager{
-		providers: make(map[string]ResidentialProxyProvider),
+		providers: registry.GetProviders(),
 		healthChecker: &ProxyHealthChecker{
 			checkInterval: 30 * time.Second,
 			timeout:       10 * time.Second,
@@ -95,18 +57,18 @@ func NewResidentialProxyManager() *ResidentialProxyManager {
 }
 
 // RegisterProvider 注册代理提供者
-func (rpm *ResidentialProxyManager) RegisterProvider(name string, provider ResidentialProxyProvider) {
+func (rpm *ResidentialProxyManager) RegisterProvider(name string, provider providers.ResidentialProxyProvider) {
 	rpm.mu.Lock()
 	defer rpm.mu.Unlock()
 	rpm.providers[name] = provider
 }
 
 // GetBestProxy 获取最佳代理
-func (rpm *ResidentialProxyManager) GetBestProxy(ctx context.Context, targetAPI string) (*ResidentialProxy, error) {
+func (rpm *ResidentialProxyManager) GetBestProxy(ctx context.Context, targetAPI string) (*providers.ResidentialProxy, error) {
 	rpm.mu.RLock()
 	defer rpm.mu.RUnlock()
 
-	var bestProxy *ResidentialProxy
+	var bestProxy *providers.ResidentialProxy
 	var bestScore float64
 
 	for _, provider := range rpm.providers {
@@ -131,7 +93,7 @@ func (rpm *ResidentialProxyManager) GetBestProxy(ctx context.Context, targetAPI 
 }
 
 // calculateProxyScore 计算代理评分
-func (rpm *ResidentialProxyManager) calculateProxyScore(proxy *ResidentialProxy, targetAPI string) float64 {
+func (rpm *ResidentialProxyManager) calculateProxyScore(proxy *providers.ResidentialProxy, targetAPI string) float64 {
 	score := 0.0
 
 	// 基础质量评分 (0-40分)
@@ -155,7 +117,7 @@ func (rpm *ResidentialProxyManager) calculateProxyScore(proxy *ResidentialProxy,
 }
 
 // getLocationScore 获取地理位置评分
-func (rpm *ResidentialProxyManager) getLocationScore(proxy *ResidentialProxy, targetAPI string) float64 {
+func (rpm *ResidentialProxyManager) getLocationScore(proxy *providers.ResidentialProxy, targetAPI string) float64 {
 	// 根据目标API选择最佳地理位置
 	preferredCountries := map[string][]string{
 		"openai":   {"US", "CA", "GB", "AU"},
@@ -179,7 +141,7 @@ func (rpm *ResidentialProxyManager) getLocationScore(proxy *ResidentialProxy, ta
 }
 
 // CreateHTTPClient 创建使用住宅IP的HTTP客户端
-func (rpm *ResidentialProxyManager) CreateHTTPClient(proxy *ResidentialProxy) (*http.Client, error) {
+func (rpm *ResidentialProxyManager) CreateHTTPClient(proxy *providers.ResidentialProxy) (*http.Client, error) {
 	// 构建代理URL
 	proxyURL := &url.URL{
 		Scheme: "http",
@@ -210,7 +172,7 @@ func (rpm *ResidentialProxyManager) CreateHTTPClient(proxy *ResidentialProxy) (*
 }
 
 // ReportUsage 报告使用情况
-func (rpm *ResidentialProxyManager) ReportUsage(proxy *ResidentialProxy, success bool, latency time.Duration) {
+func (rpm *ResidentialProxyManager) ReportUsage(proxy *providers.ResidentialProxy, success bool, latency time.Duration) {
 	rpm.mu.RLock()
 	provider, exists := rpm.providers[proxy.ISP]
 	rpm.mu.RUnlock()
@@ -238,7 +200,7 @@ func (rpm *ResidentialProxyManager) StartHealthCheck(ctx context.Context) {
 // performHealthCheck 执行健康检查
 func (rpm *ResidentialProxyManager) performHealthCheck(ctx context.Context) {
 	rpm.mu.RLock()
-	providers := make([]ResidentialProxyProvider, 0, len(rpm.providers))
+	providers := make([]providers.ResidentialProxyProvider, 0, len(rpm.providers))
 	for _, provider := range rpm.providers {
 		providers = append(providers, provider)
 	}
@@ -250,7 +212,7 @@ func (rpm *ResidentialProxyManager) performHealthCheck(ctx context.Context) {
 }
 
 // checkProviderHealth 检查提供者健康状态
-func (rpm *ResidentialProxyManager) checkProviderHealth(ctx context.Context, provider ResidentialProxyProvider) {
+func (rpm *ResidentialProxyManager) checkProviderHealth(ctx context.Context, provider providers.ResidentialProxyProvider) {
 	proxy, err := provider.GetProxy(ctx)
 	if err != nil {
 		return
