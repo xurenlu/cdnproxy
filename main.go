@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +19,8 @@ import (
 	"cdnproxy/internal/storage"
 )
 
+var startTime = time.Now()
+
 func main() {
 	// 设置文件描述符限制
 	if err := setFDLimit(4096); err != nil {
@@ -29,7 +30,7 @@ func main() {
 	cfg := config.Load()
 
 	// 使用硬盘缓存替代 Redis
-	diskCache, err := cache.NewDiskCache(cfg.CacheDir, 250*1024*1024) // 最大缓存单文件 100MB
+	diskCache, err := cache.NewDiskCache(cfg.CacheDir, 250*1024*1024) // 最大缓存单文件 250MB
 	if err != nil {
 		log.Fatalf("failed to create disk cache: %v", err)
 	}
@@ -53,15 +54,10 @@ func main() {
 	// 启动定期清理过期缓存
 	go cleanupCache(diskCache)
 
-	// 启动定期资源监控
+	// 启动资源监控
 	go monitorResources()
 
-	sessionStore, err := storage.NewFileSessionStore(cfg.DataDir, cfg.SessionTTL)
-	if err != nil {
-		log.Fatalf("failed to create session store: %v", err)
-	}
-
-	adminServer, err := admin.NewServerWithSessionStore(cfg, whitelistStore, configStore, sessionStore)
+	adminServer, err := admin.NewServer(cfg, whitelistStore, configStore)
 	if err != nil {
 		log.Fatalf("failed to create admin server: %v", err)
 	}
@@ -71,8 +67,33 @@ func main() {
 	mux := http.NewServeMux()
 	// Health check
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		
+		status := "ok"
+		code := http.StatusOK
+		
+		// 检查内存使用
+		if m.Alloc > 500*1024*1024 { // 500MB
+			status = "warning: high memory usage"
+			code = http.StatusOK
+		}
+		
+		// 检查 Goroutine 数量
+		if runtime.NumGoroutine() > 1000 {
+			status = "warning: too many goroutines"
+			code = http.StatusOK
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
+			"status": "%s",
+			"memory_alloc_mb": %d,
+			"memory_sys_mb": %d,
+			"goroutines": %d,
+			"uptime_seconds": %d
+		}`, status, m.Alloc/1024/1024, m.Sys/1024/1024, runtime.NumGoroutine(), int(time.Since(startTime).Seconds()))))
 	})
 
 	// Metrics endpoint
@@ -101,11 +122,11 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           panicRecoveryMiddleware(loggingMiddleware(mux)),
+		Handler:           loggingMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second, // 添加读取超时
-		WriteTimeout:      30 * time.Second, // 添加写入超时
-		IdleTimeout:       60 * time.Second, // 缩短空闲超时
+		ReadTimeout:       30 * time.Second,  // 添加读取超时
+		WriteTimeout:      30 * time.Second,  // 添加写入超时
+		IdleTimeout:       60 * time.Second,  // 缩短空闲超时
 	}
 
 	go func() {
@@ -120,78 +141,22 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 	log.Println("shutting down...")
-
-	// 创建关闭上下文
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	// 关闭HTTP服务器
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("server shutdown error: %v", err)
 	}
-
-	// 关闭storage层，确保数据保存
-	log.Println("closing storage layers...")
-	if closer, ok := interface{}(sessionStore).(interface{ Close() error }); ok {
-		if err := closer.Close(); err != nil {
-			log.Printf("session store close error: %v", err)
-		}
-	}
-	if closer, ok := interface{}(counterStore).(interface{ Close() error }); ok {
-		if err := closer.Close(); err != nil {
-			log.Printf("counter store close error: %v", err)
-		}
-	}
-
-	log.Println("shutdown complete")
 }
 
 func cleanupCache(diskCache *cache.DiskCache) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	cleaning := false
-	var cleanMutex sync.Mutex
-
 	for range ticker.C {
-		// 检查是否已有清理任务在运行
-		cleanMutex.Lock()
-		if cleaning {
-			log.Printf("Previous cleanup still running, skipping this round")
-			cleanMutex.Unlock()
-			continue
+		if err := diskCache.Cleanup(context.Background()); err != nil {
+			log.Printf("cache cleanup error: %v", err)
 		}
-		cleaning = true
-		cleanMutex.Unlock()
-
-		// 异步清理，避免阻塞主流程
-		go func() {
-			defer func() {
-				cleanMutex.Lock()
-				cleaning = false
-				cleanMutex.Unlock()
-			}()
-
-			time.Sleep(5 * time.Minute) // 延迟清理，避免与高峰期冲突
-			if err := diskCache.Cleanup(context.Background()); err != nil {
-				log.Printf("cache cleanup error: %v", err)
-			}
-		}()
 	}
-}
-
-// panicRecoveryMiddleware 捕获panic防止服务崩溃
-func panicRecoveryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := recover(); err != nil {
-				log.Printf("PANIC RECOVERED: %v\nRequest: %s %s\nUser-Agent: %s",
-					err, r.Method, r.URL.Path, r.UserAgent())
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {
@@ -214,6 +179,7 @@ func (lrw *logResponseWriter) WriteHeader(code int) {
 	lrw.ResponseWriter.WriteHeader(code)
 }
 
+// setFDLimit 设置文件描述符限制
 func setFDLimit(limit int) error {
 	var rLimit syscall.Rlimit
 	rLimit.Cur = uint64(limit)
@@ -243,13 +209,20 @@ func monitorResources() {
 			goroutines,
 			m.Sys/1024/1024)
 
-		// 检查资源使用限制
-		if m.Alloc/1024/1024 > MaxMemoryMB {
-			log.Printf("WARNING: Memory usage too high: %dMB (limit: %dMB)", m.Alloc/1024/1024, MaxMemoryMB)
+		// 检查内存使用
+		if m.Alloc > MaxMemoryMB*1024*1024 {
+			log.Printf("WARNING: High memory usage: %dMB", m.Alloc/1024/1024)
 		}
 
+		// 检查 Goroutine 数量
 		if goroutines > MaxGoroutines {
-			log.Printf("WARNING: Too many goroutines: %d (limit: %d)", goroutines, MaxGoroutines)
+			log.Printf("WARNING: High goroutine count: %d", goroutines)
+		}
+
+		// 定期输出状态（每5分钟）
+		if time.Since(startTime).Minutes() > 0 && int(time.Since(startTime).Minutes())%5 == 0 {
+			log.Printf("STATUS: Memory=%dMB, Goroutines=%d, Uptime=%s",
+				m.Alloc/1024/1024, goroutines, time.Since(startTime).Round(time.Second))
 		}
 	}
 }
