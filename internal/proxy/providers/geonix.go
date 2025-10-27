@@ -30,17 +30,17 @@ type GeonixResponse struct {
 
 // GeonixProxy Geonix 代理信息
 type GeonixProxy struct {
-	ID          string `json:"id"`
-	IP          string `json:"ip"`
-	Port        int    `json:"port"`
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	Location    string `json:"location"`
-	Country     string `json:"country"`
-	City        string `json:"city"`
-	ISP         string `json:"isp"`
-	Type        string `json:"type"`
-	Quality     int    `json:"quality"`
+	ID          string  `json:"id"`
+	IP          string  `json:"ip"`
+	Port        int     `json:"port"`
+	Username    string  `json:"username"`
+	Password    string  `json:"password"`
+	Location    string  `json:"location"`
+	Country     string  `json:"country"`
+	City        string  `json:"city"`
+	ISP         string  `json:"isp"`
+	Type        string  `json:"type"`
+	Quality     int     `json:"quality"`
 	SuccessRate float64 `json:"success_rate"`
 }
 
@@ -145,8 +145,8 @@ func (gp *GeonixProvider) GetName() string {
 func (gp *GeonixProvider) GetCost() *ProxyCost {
 	return &ProxyCost{
 		PerRequest: 0.0007, // $0.0007 per request
-		PerGB:      0.35,    // $0.35 per GB
-		PerHour:    0.07,    // $0.07 per hour
+		PerGB:      0.35,   // $0.35 per GB
+		PerHour:    0.07,   // $0.07 per hour
 		Currency:   "USD",
 	}
 }

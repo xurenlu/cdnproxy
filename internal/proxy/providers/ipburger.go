@@ -30,17 +30,17 @@ type IPBurgerResponse struct {
 
 // IPBurgerProxy IPBurger 代理信息
 type IPBurgerProxy struct {
-	ID          string `json:"id"`
-	IP          string `json:"ip"`
-	Port        int    `json:"port"`
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	Location    string `json:"location"`
-	Country     string `json:"country"`
-	City        string `json:"city"`
-	ISP         string `json:"isp"`
-	Type        string `json:"type"`
-	Quality     int    `json:"quality"`
+	ID          string  `json:"id"`
+	IP          string  `json:"ip"`
+	Port        int     `json:"port"`
+	Username    string  `json:"username"`
+	Password    string  `json:"password"`
+	Location    string  `json:"location"`
+	Country     string  `json:"country"`
+	City        string  `json:"city"`
+	ISP         string  `json:"isp"`
+	Type        string  `json:"type"`
+	Quality     int     `json:"quality"`
 	SuccessRate float64 `json:"success_rate"`
 }
 
@@ -145,8 +145,8 @@ func (ip *IPBurgerProvider) GetName() string {
 func (ip *IPBurgerProvider) GetCost() *ProxyCost {
 	return &ProxyCost{
 		PerRequest: 0.0015, // $0.0015 per request
-		PerGB:      0.75,    // $0.75 per GB
-		PerHour:    0.15,    // $0.15 per hour
+		PerGB:      0.75,   // $0.75 per GB
+		PerHour:    0.15,   // $0.15 per hour
 		Currency:   "USD",
 	}
 }

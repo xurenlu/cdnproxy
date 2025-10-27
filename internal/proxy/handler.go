@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"image"
 	"io"
 	"log"
 	"net"
@@ -22,8 +21,6 @@ import (
 	"cdnproxy/internal/cache"
 	"cdnproxy/internal/config"
 	"cdnproxy/internal/metrics"
-
-	"github.com/chai2010/webp"
 )
 
 var (
@@ -43,10 +40,7 @@ type Handler struct {
 	semaphore        chan struct{}            // 添加信号量
 	bufferPool       sync.Pool                // 内存池
 	wsSemaphore      chan struct{}            // WebSocket并发限制
-	webpSemaphore    chan struct{}            // WebP转换并发限制
-	uaCache          sync.Map                 // User-Agent解析缓存
-	uaCacheSize      int64                    // 缓存大小计数器
-	uaCacheMutex     sync.Mutex               // 缓存大小保护锁
+	webpConverter    *WebPConverter           // WebP转换器
 	residentialProxy *ResidentialProxyManager // 住宅IP代理管理器
 	aiAPIProxy       *AIAPIProxy              // AI API代理处理器
 }
@@ -93,10 +87,13 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 	}
 	// 初始化住宅IP代理管理器
 	residentialProxy := NewResidentialProxyManager()
-
+	
 	// 初始化AI API代理处理器
 	aiAPIProxy := NewAIAPIProxy(residentialProxy)
-
+	
+	// 初始化WebP转换器
+	webpConverter := NewWebPConverter()
+	
 	return &Handler{
 		cfg:            cfg,
 		cache:          diskCache,
@@ -113,13 +110,13 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 		},
 		semaphore:     make(chan struct{}, 50), // 最多50个并发
 		wsSemaphore:   make(chan struct{}, 10), // 最多10个WebSocket连接
-		webpSemaphore: make(chan struct{}, 5),  // 最多5个WebP转换并发（CPU密集）
 		bufferPool: sync.Pool{
 			New: func() interface{} {
 				buf := make([]byte, 64*1024) // 64KB 缓冲区
 				return &buf
 			},
 		},
+		webpConverter:   webpConverter,       // WebP转换器
 		residentialProxy: residentialProxy, // 住宅IP代理管理器
 		aiAPIProxy:       aiAPIProxy,       // AI API代理处理器
 	}
@@ -389,20 +386,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 检查是否需要图片格式转换（只对小文件）
 		userAgent := r.Header.Get("User-Agent")
 		acceptHeader := r.Header.Get("Accept")
-		if h.shouldConvertToWebP(contentType, userAgent, acceptHeader) {
-			// 使用信号量限制WebP转换并发数
-			select {
-			case h.webpSemaphore <- struct{}{}:
-				webpBody, err := h.convertToWebP(body, contentType)
-				<-h.webpSemaphore // 释放信号量
-				if err == nil && len(webpBody) > 0 {
-					body = webpBody
-					contentType = "image/webp"
-					w.Header().Set("Content-Type", "image/webp")
-				}
-			default:
-				// WebP转换队列已满，跳过转换，直接返回原图
-				log.Printf("WebP conversion queue full, skipping conversion")
+		if h.webpConverter.ShouldConvertToWebP(contentType, userAgent, acceptHeader) {
+			// WebP转换器内部已经使用信号量限制并发数
+			webpBody, err := h.webpConverter.ConvertToWebP(body, contentType)
+			if err == nil && len(webpBody) > 0 {
+				body = webpBody
+				contentType = "image/webp"
+				w.Header().Set("Content-Type", "image/webp")
 			}
 		}
 
@@ -615,206 +605,8 @@ func (h *Handler) compressBody(body []byte, acceptEncoding string) ([]byte, stri
 	return body, ""
 }
 
-// storeUACache 存储User-Agent缓存，限制大小防止内存泄漏
-func (h *Handler) storeUACache(key string, value bool) {
-	const maxCacheSize = 10000 // 最多缓存10000个User-Agent
-
-	h.uaCacheMutex.Lock()
-	defer h.uaCacheMutex.Unlock()
-
-	// 如果缓存已满，清空缓存
-	if h.uaCacheSize >= maxCacheSize {
-		log.Printf("UA cache size limit reached (%d), clearing cache", maxCacheSize)
-		h.uaCache = sync.Map{}
-		h.uaCacheSize = 0
-	}
-
-	h.uaCache.Store(key, value)
-	h.uaCacheSize++
-}
-
-// shouldConvertToWebP 判断是否应该转换为WebP格式
-func (h *Handler) shouldConvertToWebP(contentType, userAgent, acceptHeader string) bool {
-	// 只处理图片类型
-	if !strings.HasPrefix(contentType, "image/") {
-		return false
-	}
-
-	// 检查User-Agent缓存
-	cacheKey := userAgent + "|" + acceptHeader
-	if cached, ok := h.uaCache.Load(cacheKey); ok {
-		return cached.(bool)
-	}
-
-	// 检查User-Agent是否支持WebP（主要判断依据）
-	userAgent = strings.ToLower(userAgent)
-
-	// Chrome/Chromium 23+ 支持WebP
-	if strings.Contains(userAgent, "chrome") && !strings.Contains(userAgent, "edg") {
-		result := true
-		h.storeUACache(cacheKey, result)
-		return result
-	}
-
-	// Firefox 65+ 支持WebP (2019年1月发布)
-	if strings.Contains(userAgent, "firefox") {
-		// 提取Firefox版本号进行更精确的判断
-		if version := h.extractFirefoxVersion(userAgent); version >= 65 {
-			result := true
-			h.storeUACache(cacheKey, result)
-			return result
-		}
-	}
-
-	// Safari 14+ 支持WebP (2020年9月发布)
-	if strings.Contains(userAgent, "safari") && !strings.Contains(userAgent, "chrome") {
-		// 提取Safari版本号
-		if version := h.extractSafariVersion(userAgent); version >= 14 {
-			result := true
-			h.storeUACache(cacheKey, result)
-			return result
-		}
-	}
-
-	// Edge 18+ 支持WebP (2018年10月发布)
-	if strings.Contains(userAgent, "edg") {
-		result := true
-		h.storeUACache(cacheKey, result)
-		return result
-	}
-
-	// Opera 12+ 支持WebP
-	if strings.Contains(userAgent, "opr") || strings.Contains(userAgent, "opera") {
-		result := true
-		h.storeUACache(cacheKey, result)
-		return result
-	}
-
-	// 如果User-Agent不支持，但Accept头明确支持WebP，也可以转换
-	// 这适用于一些API客户端或特殊工具
-	if strings.Contains(acceptHeader, "image/webp") {
-		result := true
-		h.storeUACache(cacheKey, result)
-		return result
-	}
-
-	result := false
-	h.storeUACache(cacheKey, result)
-	return result
-}
-
-// extractFirefoxVersion 提取Firefox版本号
-func (h *Handler) extractFirefoxVersion(userAgent string) int {
-	// 查找 "Firefox/" 后的版本号
-	start := strings.Index(userAgent, "firefox/")
-	if start == -1 {
-		return 0
-	}
-	start += 8 // "firefox/".length
-
-	// 找到版本号结束位置
-	end := start
-	for end < len(userAgent) && (userAgent[end] >= '0' && userAgent[end] <= '9' || userAgent[end] == '.') {
-		end++
-	}
-
-	// 解析主版本号
-	versionStr := userAgent[start:end]
-	if dotIndex := strings.Index(versionStr, "."); dotIndex != -1 {
-		versionStr = versionStr[:dotIndex]
-	}
-
-	// 转换为整数
-	var version int
-	fmt.Sscanf(versionStr, "%d", &version)
-	return version
-}
-
-// extractSafariVersion 提取Safari版本号
-func (h *Handler) extractSafariVersion(userAgent string) int {
-	// 查找 "Version/" 后的版本号
-	start := strings.Index(userAgent, "version/")
-	if start == -1 {
-		return 0
-	}
-	start += 8 // "version/".length
-
-	// 找到版本号结束位置
-	end := start
-	for end < len(userAgent) && (userAgent[end] >= '0' && userAgent[end] <= '9' || userAgent[end] == '.') {
-		end++
-	}
-
-	// 解析主版本号
-	versionStr := userAgent[start:end]
-	if dotIndex := strings.Index(versionStr, "."); dotIndex != -1 {
-		versionStr = versionStr[:dotIndex]
-	}
-
-	// 转换为整数
-	var version int
-	fmt.Sscanf(versionStr, "%d", &version)
-	return version
-}
-
 // buildCacheKey 生成缓存键
 func buildCacheKey(method, upstreamURL string) string {
 	h := sha256.Sum256([]byte(method + " " + upstreamURL))
 	return "cache:v3:" + hex.EncodeToString(h[:])
-}
-
-// convertToWebP 将图片转换为WebP格式
-func (h *Handler) convertToWebP(body []byte, contentType string) ([]byte, error) {
-	// 只处理支持的图片格式
-	if !strings.Contains(contentType, "image/jpeg") &&
-		!strings.Contains(contentType, "image/png") &&
-		!strings.Contains(contentType, "image/gif") {
-		return nil, fmt.Errorf("unsupported image type: %s", contentType)
-	}
-
-	// 使用defer recover防止image.Decode panic
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("PANIC in image decode: %v", r)
-		}
-	}()
-
-	// 解码图片
-	img, _, err := image.Decode(bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode image: %v", err)
-	}
-
-	// 检查图片尺寸，防止内存占用过大
-	bounds := img.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
-	const maxPixels = 4096 * 4096 // 最大16M像素
-	if width*height > maxPixels {
-		return nil, fmt.Errorf("image too large: %dx%d pixels", width, height)
-	}
-
-	// 转换为WebP格式
-	var buf bytes.Buffer
-
-	// 设置WebP编码选项
-	options := &webp.Options{
-		Lossless: false, // 使用有损压缩以获得更好的压缩率
-		Quality:  80,    // 质量设置为80，平衡文件大小和图片质量
-	}
-
-	// 编码为WebP
-	if err := webp.Encode(&buf, img, options); err != nil {
-		return nil, fmt.Errorf("failed to encode WebP: %v", err)
-	}
-
-	webpData := buf.Bytes()
-
-	// 只有WebP版本确实更小才返回WebP
-	if len(webpData) < len(body) {
-		return webpData, nil
-	}
-
-	// 如果WebP版本更大，返回原始图片
-	return body, nil
 }
