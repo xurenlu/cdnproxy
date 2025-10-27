@@ -12,16 +12,16 @@ import (
 type ResidentialProxyProvider interface {
 	// GetProxy 获取一个可用的代理
 	GetProxy(ctx context.Context) (*ResidentialProxy, error)
-	
+
 	// GetProxyList 获取代理列表
 	GetProxyList(ctx context.Context) ([]*ResidentialProxy, error)
-	
+
 	// ReportUsage 报告使用情况
 	ReportUsage(proxy *ResidentialProxy, success bool, latency time.Duration) error
-	
+
 	// GetName 获取提供者名称
 	GetName() string
-	
+
 	// GetCost 获取成本信息
 	GetCost() *ProxyCost
 }
@@ -37,7 +37,7 @@ type ResidentialProxy struct {
 	Country     string            `json:"country"`
 	City        string            `json:"city"`
 	ISP         string            `json:"isp"`
-	Type        string            `json:"type"` // residential, mobile, datacenter
+	Type        string            `json:"type"`    // residential, mobile, datacenter
 	Quality     int               `json:"quality"` // 1-10
 	SuccessRate float64           `json:"success_rate"`
 	LastUsed    time.Time         `json:"last_used"`

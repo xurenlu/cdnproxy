@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -23,6 +24,7 @@ type Server struct {
 	configStore    ConfigStore
 	tplLogin       *template.Template
 	tplIndex       *template.Template
+	proxyManager   ProxyManager // 代理管理器接口
 }
 
 // WhitelistStore 接口定义
@@ -36,6 +38,14 @@ type WhitelistStore interface {
 type ConfigStore interface {
 	GetReferrerThreshold(ctx context.Context) (int64, error)
 	SetReferrerThreshold(ctx context.Context, n int64) error
+}
+
+// ProxyManager 代理管理器接口
+type ProxyManager interface {
+	GetHealthStatus() map[string]interface{}
+	GetProxyStats() map[string]interface{}
+	GetProviderNames() []string
+	GetProviderCount() int
 }
 
 func NewServer(cfg config.Config, whitelistStore WhitelistStore, configStore ConfigStore) (*Server, error) {
@@ -71,6 +81,9 @@ func (s *Server) adminMux() http.Handler {
 	mux.HandleFunc("/whitelist/add", s.handleWhitelistAdd)
 	mux.HandleFunc("/whitelist/remove", s.handleWhitelistRemove)
 	mux.HandleFunc("/config/update", s.handleConfigUpdate)
+	mux.HandleFunc("/proxy/stats", s.handleProxyStats)
+	mux.HandleFunc("/proxy/health", s.handleProxyHealth)
+	mux.HandleFunc("/proxy/providers", s.handleProxyProviders)
 	return mux
 }
 
@@ -332,4 +345,100 @@ const indexHTML = `{{define "index"}}{{template "layout" .}}{{end}}{{define "con
   </table>
   <p style="color:#666;margin-top:8px">当 Referer 为域名且其后缀在此列表中时允许访问。</p>
 </div>
+
+<div class="section">
+  <h3>住宅IP代理管理</h3>
+  <div class="proxy-stats">
+    <div class="stat-item">
+      <span class="stat-label">可用提供者:</span>
+      <span class="stat-value" id="provider-count">-</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">健康代理:</span>
+      <span class="stat-value" id="healthy-proxies">-</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">平均延迟:</span>
+      <span class="stat-value" id="avg-latency">-</span>
+    </div>
+  </div>
+  <div class="proxy-actions">
+    <button onclick="refreshProxyStats()">刷新状态</button>
+    <button onclick="showProxyProviders()">查看提供者</button>
+  </div>
+</div>
 {{end}}`
+
+// 代理管理处理函数
+func (s *Server) handleProxyStats(w http.ResponseWriter, r *http.Request) {
+	if s.proxyManager == nil {
+		http.Error(w, "代理管理器未初始化", http.StatusInternalServerError)
+		return
+	}
+
+	stats := s.proxyManager.GetProxyStats()
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(fmt.Sprintf(`{
+		"provider_count": %d,
+		"healthy_proxies": %v,
+		"unhealthy_proxies": %v,
+		"average_latency": %v
+	}`,
+		s.proxyManager.GetProviderCount(),
+		stats["healthy_proxies"],
+		stats["unhealthy_proxies"],
+		stats["average_latency"])))
+}
+
+func (s *Server) handleProxyHealth(w http.ResponseWriter, r *http.Request) {
+	if s.proxyManager == nil {
+		http.Error(w, "代理管理器未初始化", http.StatusInternalServerError)
+		return
+	}
+
+	health := s.proxyManager.GetHealthStatus()
+	w.Header().Set("Content-Type", "application/json")
+
+	// 简化健康状态输出
+	healthyCount := 0
+	totalCount := len(health)
+	for _, result := range health {
+		if resultMap, ok := result.(map[string]interface{}); ok {
+			if isHealthy, exists := resultMap["is_healthy"]; exists {
+				if healthy, ok := isHealthy.(bool); ok && healthy {
+					healthyCount++
+				}
+			}
+		}
+	}
+
+	w.Write([]byte(fmt.Sprintf(`{
+		"total_proxies": %d,
+		"healthy_proxies": %d,
+		"health_rate": %.2f
+	}`, totalCount, healthyCount, float64(healthyCount)/float64(totalCount))))
+}
+
+func (s *Server) handleProxyProviders(w http.ResponseWriter, r *http.Request) {
+	if s.proxyManager == nil {
+		http.Error(w, "代理管理器未初始化", http.StatusInternalServerError)
+		return
+	}
+
+	providers := s.proxyManager.GetProviderNames()
+	w.Header().Set("Content-Type", "application/json")
+
+	providersJSON := "["
+	for i, provider := range providers {
+		if i > 0 {
+			providersJSON += ","
+		}
+		providersJSON += fmt.Sprintf(`"%s"`, provider)
+	}
+	providersJSON += "]"
+
+	w.Write([]byte(fmt.Sprintf(`{
+		"providers": %s,
+		"count": %d
+	}`, providersJSON, len(providers))))
+}

@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"sync"
 	"time"
-	
+
 	"cdnproxy/internal/proxy/providers"
 )
 
@@ -45,7 +45,7 @@ func NewResidentialProxyManager() *ResidentialProxyManager {
 	// 创建提供者注册表并注册所有提供者
 	registry := providers.NewProviderRegistry()
 	registry.RegisterAllProviders()
-	
+
 	return &ResidentialProxyManager{
 		providers: registry.GetProviders(),
 		healthChecker: &ProxyHealthChecker{
@@ -120,10 +120,10 @@ func (rpm *ResidentialProxyManager) calculateProxyScore(proxy *providers.Residen
 func (rpm *ResidentialProxyManager) getLocationScore(proxy *providers.ResidentialProxy, targetAPI string) float64 {
 	// 根据目标API选择最佳地理位置
 	preferredCountries := map[string][]string{
-		"openai":   {"US", "CA", "GB", "AU"},
-		"claude":   {"US", "CA", "GB", "AU"},
-		"gemini":   {"US", "CA", "GB", "AU"},
-		"default":  {"US", "CA", "GB", "AU", "DE", "FR"},
+		"openai":  {"US", "CA", "GB", "AU"},
+		"claude":  {"US", "CA", "GB", "AU"},
+		"gemini":  {"US", "CA", "GB", "AU"},
+		"default": {"US", "CA", "GB", "AU", "DE", "FR"},
 	}
 
 	countries, exists := preferredCountries[targetAPI]

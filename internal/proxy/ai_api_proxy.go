@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	
+
 	"cdnproxy/internal/proxy/providers"
 )
 

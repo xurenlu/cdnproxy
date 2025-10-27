@@ -33,20 +33,22 @@ var (
 )
 
 type Handler struct {
-	cfg            config.Config
-	cache          *cache.DiskCache
-	whitelistStore WhitelistStore
-	httpClient     *http.Client
-	apiClient      *http.Client // API专用客户端（长超时）
-	configStore    ConfigStore
-	counterStore   CounterStore
-	semaphore      chan struct{} // 添加信号量
-	bufferPool     sync.Pool     // 内存池
-	wsSemaphore    chan struct{} // WebSocket并发限制
-	webpSemaphore  chan struct{} // WebP转换并发限制
-	uaCache        sync.Map      // User-Agent解析缓存
-	uaCacheSize    int64         // 缓存大小计数器
-	uaCacheMutex   sync.Mutex    // 缓存大小保护锁
+	cfg              config.Config
+	cache            *cache.DiskCache
+	whitelistStore   WhitelistStore
+	httpClient       *http.Client
+	apiClient        *http.Client // API专用客户端（长超时）
+	configStore      ConfigStore
+	counterStore     CounterStore
+	semaphore        chan struct{}            // 添加信号量
+	bufferPool       sync.Pool                // 内存池
+	wsSemaphore      chan struct{}            // WebSocket并发限制
+	webpSemaphore    chan struct{}            // WebP转换并发限制
+	uaCache          sync.Map                 // User-Agent解析缓存
+	uaCacheSize      int64                    // 缓存大小计数器
+	uaCacheMutex     sync.Mutex               // 缓存大小保护锁
+	residentialProxy *ResidentialProxyManager // 住宅IP代理管理器
+	aiAPIProxy       *AIAPIProxy              // AI API代理处理器
 }
 
 // WhitelistStore 接口定义
@@ -89,6 +91,12 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 		WriteBufferSize: 32 * 1024, // 32KB 写缓冲
 		ReadBufferSize:  32 * 1024, // 32KB 读缓冲
 	}
+	// 初始化住宅IP代理管理器
+	residentialProxy := NewResidentialProxyManager()
+
+	// 初始化AI API代理处理器
+	aiAPIProxy := NewAIAPIProxy(residentialProxy)
+
 	return &Handler{
 		cfg:            cfg,
 		cache:          diskCache,
@@ -112,6 +120,8 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 				return &buf
 			},
 		},
+		residentialProxy: residentialProxy, // 住宅IP代理管理器
+		aiAPIProxy:       aiAPIProxy,       // AI API代理处理器
 	}
 }
 
@@ -155,7 +165,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 检查是否是 API 域名（这些请求不缓存，支持 WebSocket/SSE/长连接）
 	if h.isAPIDomain(upstreamURL) {
 		// API 代理不需要访问控制检查（由上游 API 服务自己控制）
-		h.proxyAPIRequest(w, r, upstreamURL)
+		// 使用住宅IP代理处理AI API请求
+		if err := h.aiAPIProxy.ProxyAIRequest(w, r, upstreamURL); err != nil {
+			// 如果住宅IP代理失败，回退到普通API代理
+			h.proxyAPIRequest(w, r, upstreamURL)
+		}
 		success = true
 		return
 	}

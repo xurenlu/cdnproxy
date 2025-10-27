@@ -30,17 +30,17 @@ type YouproxyResponse struct {
 
 // YouproxyProxy Youproxy 代理信息
 type YouproxyProxy struct {
-	ID          string `json:"id"`
-	IP          string `json:"ip"`
-	Port        int    `json:"port"`
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	Location    string `json:"location"`
-	Country     string `json:"country"`
-	City        string `json:"city"`
-	ISP         string `json:"isp"`
-	Type        string `json:"type"`
-	Quality     int    `json:"quality"`
+	ID          string  `json:"id"`
+	IP          string  `json:"ip"`
+	Port        int     `json:"port"`
+	Username    string  `json:"username"`
+	Password    string  `json:"password"`
+	Location    string  `json:"location"`
+	Country     string  `json:"country"`
+	City        string  `json:"city"`
+	ISP         string  `json:"isp"`
+	Type        string  `json:"type"`
+	Quality     int     `json:"quality"`
 	SuccessRate float64 `json:"success_rate"`
 }
 
