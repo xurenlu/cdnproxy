@@ -21,6 +21,7 @@ type ResidentialProxyManager struct {
 	providers     map[string]providers.ResidentialProxyProvider
 	mu            sync.RWMutex
 	healthChecker *ProxyHealthChecker
+	metrics       *ProxyMetricsCollector
 }
 
 // ProxyHealthChecker 代理健康检查器
@@ -53,6 +54,7 @@ func NewResidentialProxyManager() *ResidentialProxyManager {
 			timeout:       10 * time.Second,
 			results:       make(map[string]*HealthResult),
 		},
+		metrics: NewProxyMetricsCollector(),
 	}
 }
 
@@ -180,6 +182,12 @@ func (rpm *ResidentialProxyManager) ReportUsage(proxy *providers.ResidentialProx
 	if exists {
 		provider.ReportUsage(proxy, success, latency)
 	}
+	
+	// 计算成本
+	cost := rpm.calculateCost(proxy, latency)
+	
+	// 记录指标
+	rpm.metrics.RecordRequest(proxy.ID, success, latency, cost)
 }
 
 // StartHealthCheck 启动健康检查
@@ -254,4 +262,30 @@ func (rpm *ResidentialProxyManager) GetHealthStatus() map[string]*HealthResult {
 	}
 
 	return results
+}
+
+// calculateCost 计算成本
+func (rpm *ResidentialProxyManager) calculateCost(proxy *providers.ResidentialProxy, latency time.Duration) float64 {
+	rpm.mu.RLock()
+	provider, exists := rpm.providers[proxy.ISP]
+	rpm.mu.RUnlock()
+	
+	if !exists {
+		return 0
+	}
+	
+	cost := provider.GetCost()
+	
+	// 计算每次请求的成本（简化处理，假设每次请求1KB）
+	return cost.PerRequest + (cost.PerGB / 1024 / 1024) + (cost.PerHour / 3600 * float64(latency.Seconds()))
+}
+
+// GetMetrics 获取指标收集器
+func (rpm *ResidentialProxyManager) GetMetrics() *ProxyMetricsCollector {
+	return rpm.metrics
+}
+
+// GetSummary 获取汇总统计
+func (rpm *ResidentialProxyManager) GetSummary() map[string]interface{} {
+	return rpm.metrics.GetSummary()
 }
