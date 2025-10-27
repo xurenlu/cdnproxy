@@ -74,6 +74,24 @@ func (pr *ProviderRegistry) RegisterAllProviders() {
 			pr.providers["youproxy"] = NewYouproxyProvider(apiKey, username, password)
 		}
 	}
+
+	// 注册 Geonix
+	if apiKey := os.Getenv("GEONIX_API_KEY"); apiKey != "" {
+		username := os.Getenv("GEONIX_USERNAME")
+		password := os.Getenv("GEONIX_PASSWORD")
+		if username != "" && password != "" {
+			pr.providers["geonix"] = NewGeonixProvider(apiKey, username, password)
+		}
+	}
+
+	// 注册 IPBurger
+	if apiKey := os.Getenv("IPBURGER_API_KEY"); apiKey != "" {
+		username := os.Getenv("IPBURGER_USERNAME")
+		password := os.Getenv("IPBURGER_PASSWORD")
+		if username != "" && password != "" {
+			pr.providers["ipburger"] = NewIPBurgerProvider(apiKey, username, password)
+		}
+	}
 }
 
 // GetProviders 获取所有已注册的提供者
