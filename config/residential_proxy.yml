@@ -1,0 +1,87 @@
+# 住宅IP代理配置
+# 作者: rocky<m@some.im>
+
+# 住宅IP代理提供者配置
+providers:
+  # Bright Data 配置
+  bright_data:
+    enabled: true
+    api_key: "${BRIGHT_DATA_API_KEY}"
+    username: "${BRIGHT_DATA_USERNAME}"
+    password: "${BRIGHT_DATA_PASSWORD}"
+    base_url: "https://api.brightdata.com"
+    timeout: 30
+    max_retries: 3
+
+  # Smartproxy 配置
+  smartproxy:
+    enabled: true
+    api_key: "${SMARTPROXY_API_KEY}"
+    username: "${SMARTPROXY_USERNAME}"
+    password: "${SMARTPROXY_PASSWORD}"
+    base_url: "https://api.smartproxy.com"
+    timeout: 30
+    max_retries: 3
+
+  # NetNut 配置
+  netnut:
+    enabled: true
+    api_key: "${NETNUT_API_KEY}"
+    username: "${NETNUT_USERNAME}"
+    password: "${NETNUT_PASSWORD}"
+    base_url: "https://api.netnut.io"
+    timeout: 30
+    max_retries: 3
+
+# 代理池配置
+proxy_pool:
+  # 健康检查配置
+  health_check:
+    interval: 30s
+    timeout: 10s
+    max_failures: 3
+
+  # 代理选择配置
+  selection:
+    # 质量权重 (0-100)
+    quality_weight: 40
+    # 成功率权重 (0-100)
+    success_rate_weight: 30
+    # 地理位置权重 (0-100)
+    location_weight: 20
+    # 使用频率权重 (0-100)
+    usage_weight: 10
+
+  # 地理位置偏好
+  location_preferences:
+    openai: ["US", "CA", "GB", "AU"]
+    claude: ["US", "CA", "GB", "AU"]
+    gemini: ["US", "CA", "GB", "AU"]
+    poe: ["US", "CA", "GB", "AU"]
+    default: ["US", "CA", "GB", "AU", "DE", "FR"]
+
+# 成本控制配置
+cost_control:
+  # 每日最大成本 (USD)
+  daily_max_cost: 100.0
+  # 每月最大成本 (USD)
+  monthly_max_cost: 3000.0
+  # 成本告警阈值
+  cost_alert_threshold: 0.8
+
+# 监控配置
+monitoring:
+  # 启用监控
+  enabled: true
+  # 指标收集间隔
+  metrics_interval: 60s
+  # 日志级别
+  log_level: "info"
+  # 告警配置
+  alerts:
+    # 代理健康率低于阈值时告警
+    health_rate_threshold: 0.8
+    # 平均延迟超过阈值时告警
+    latency_threshold: 5000ms
+    # 成本超过阈值时告警
+    cost_threshold: 0.9

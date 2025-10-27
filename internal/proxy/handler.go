@@ -200,9 +200,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		body := e.Body
 		if method == http.MethodGet && len(body) > 0 {
 			// 检查是否是视频/音频文件，这些文件通常已经压缩，不需要再次压缩
-			isVideoOrAudio := strings.Contains(strings.ToLower(contentType), "video/") || 
+			isVideoOrAudio := strings.Contains(strings.ToLower(contentType), "video/") ||
 				strings.Contains(strings.ToLower(contentType), "audio/")
-			
+
 			if !isVideoOrAudio {
 				acceptEncoding := r.Header.Get("Accept-Encoding")
 				compressedBody, encoding := h.compressBody(body, acceptEncoding)
@@ -309,9 +309,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var body []byte
 	if method == http.MethodGet {
 		// 检查是否是视频/音频文件
-		isVideoOrAudio := strings.Contains(strings.ToLower(contentType), "video/") || 
+		isVideoOrAudio := strings.Contains(strings.ToLower(contentType), "video/") ||
 			strings.Contains(strings.ToLower(contentType), "audio/")
-		
+
 		// 大文件直接流式传输，不缓存（但视频/音频文件例外）
 		if contentLength > largeFileThreshold && !isVideoOrAudio {
 			// 支持 Range 请求
