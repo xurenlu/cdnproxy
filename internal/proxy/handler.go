@@ -199,12 +199,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 根据客户端需求动态压缩缓存的数据
 		body := e.Body
 		if method == http.MethodGet && len(body) > 0 {
-			acceptEncoding := r.Header.Get("Accept-Encoding")
-			compressedBody, encoding := h.compressBody(body, acceptEncoding)
-			if encoding != "" {
-				w.Header().Set("Content-Encoding", encoding)
-				w.Header().Set("Vary", "Accept-Encoding")
-				body = compressedBody
+			// 检查是否是视频/音频文件，这些文件通常已经压缩，不需要再次压缩
+			isVideoOrAudio := strings.Contains(strings.ToLower(contentType), "video/") || 
+				strings.Contains(strings.ToLower(contentType), "audio/")
+			
+			if !isVideoOrAudio {
+				acceptEncoding := r.Header.Get("Accept-Encoding")
+				compressedBody, encoding := h.compressBody(body, acceptEncoding)
+				if encoding != "" {
+					w.Header().Set("Content-Encoding", encoding)
+					w.Header().Set("Vary", "Accept-Encoding")
+					body = compressedBody
+				}
 			}
 		}
 
@@ -296,12 +302,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", cacheControl)
 
 	// 定义大文件阈值（1MB），大于此值的文件使用流式传输
+	// 但视频和音频文件即使很大也要缓存，因为CDN缓存对媒体文件很重要
 	const largeFileThreshold = 1 * 1024 * 1024
+	const videoFileThreshold = 100 * 1024 * 1024 // 视频文件阈值：100MB
 
 	var body []byte
 	if method == http.MethodGet {
-		// 大文件直接流式传输，不缓存
-		if contentLength > largeFileThreshold {
+		// 检查是否是视频/音频文件
+		isVideoOrAudio := strings.Contains(strings.ToLower(contentType), "video/") || 
+			strings.Contains(strings.ToLower(contentType), "audio/")
+		
+		// 大文件直接流式传输，不缓存（但视频/音频文件例外）
+		if contentLength > largeFileThreshold && !isVideoOrAudio {
 			// 支持 Range 请求
 			w.Header().Set("Accept-Ranges", "bytes")
 
@@ -323,9 +335,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 小文件才读入内存进行处理和缓存
+		// 小文件或视频/音频文件读入内存进行处理和缓存
 		// 限制读取大小，防止OOM
-		limitedReader := io.LimitReader(resp.Body, largeFileThreshold)
+		var readLimit int64 = largeFileThreshold
+		if isVideoOrAudio {
+			readLimit = videoFileThreshold // 视频文件允许更大的缓存
+		}
+		limitedReader := io.LimitReader(resp.Body, readLimit)
 		var errCopy error
 		body, errCopy = io.ReadAll(limitedReader)
 		if errCopy != nil {

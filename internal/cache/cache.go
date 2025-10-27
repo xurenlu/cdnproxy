@@ -101,6 +101,16 @@ func GetTTLByContentType(contentType string, defaultTTL time.Duration) time.Dura
 		return 30 * 24 * time.Hour
 	}
 
+	// 视频文件 - 长期缓存 (7天)
+	if strings.Contains(contentType, "video/") {
+		return 7 * 24 * time.Hour
+	}
+
+	// 音频文件 - 长期缓存 (7天)
+	if strings.Contains(contentType, "audio/") {
+		return 7 * 24 * time.Hour
+	}
+
 	// HTML文档 - 短期缓存 (1小时)
 	if strings.Contains(contentType, "text/html") {
 		return time.Hour
@@ -135,6 +145,16 @@ func GetCacheControlByContentType(contentType string) string {
 	if strings.Contains(contentType, "font/") ||
 		strings.Contains(contentType, "application/font-") {
 		return "public, max-age=2592000, immutable" // 30天
+	}
+
+	// 视频文件 - 长期缓存
+	if strings.Contains(contentType, "video/") {
+		return "public, max-age=604800" // 7天
+	}
+
+	// 音频文件 - 长期缓存
+	if strings.Contains(contentType, "audio/") {
+		return "public, max-age=604800" // 7天
 	}
 
 	// HTML文档 - 短期缓存
