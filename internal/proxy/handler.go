@@ -87,13 +87,13 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 	}
 	// 初始化住宅IP代理管理器
 	residentialProxy := NewResidentialProxyManager()
-	
+
 	// 初始化AI API代理处理器
 	aiAPIProxy := NewAIAPIProxy(residentialProxy)
-	
+
 	// 初始化WebP转换器
 	webpConverter := NewWebPConverter()
-	
+
 	return &Handler{
 		cfg:            cfg,
 		cache:          diskCache,
@@ -108,15 +108,15 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 				return http.ErrUseLastResponse // 不自动跟随重定向
 			},
 		},
-		semaphore:     make(chan struct{}, 50), // 最多50个并发
-		wsSemaphore:   make(chan struct{}, 10), // 最多10个WebSocket连接
+		semaphore:   make(chan struct{}, 50), // 最多50个并发
+		wsSemaphore: make(chan struct{}, 10), // 最多10个WebSocket连接
 		bufferPool: sync.Pool{
 			New: func() interface{} {
 				buf := make([]byte, 64*1024) // 64KB 缓冲区
 				return &buf
 			},
 		},
-		webpConverter:   webpConverter,       // WebP转换器
+		webpConverter:    webpConverter,    // WebP转换器
 		residentialProxy: residentialProxy, // 住宅IP代理管理器
 		aiAPIProxy:       aiAPIProxy,       // AI API代理处理器
 	}

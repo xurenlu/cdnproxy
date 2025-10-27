@@ -16,9 +16,9 @@ import (
 
 // WebPConverter WebP转换器
 type WebPConverter struct {
-	uaCache      sync.Map  // User-Agent解析缓存
-	uaCacheSize  int64     // 缓存大小计数器
-	uaCacheMutex sync.Mutex // 缓存大小保护锁
+	uaCache      sync.Map      // User-Agent解析缓存
+	uaCacheSize  int64         // 缓存大小计数器
+	uaCacheMutex sync.Mutex    // 缓存大小保护锁
 	semaphore    chan struct{} // WebP转换并发限制
 }
 
