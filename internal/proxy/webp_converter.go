@@ -16,6 +16,7 @@ import (
 
 // WebPConverter WebP转换器
 type WebPConverter struct {
+	enabled      bool          // 是否启用WebP转换
 	uaCache      sync.Map      // User-Agent解析缓存
 	uaCacheSize  int64         // 缓存大小计数器
 	uaCacheMutex sync.Mutex    // 缓存大小保护锁
@@ -23,8 +24,9 @@ type WebPConverter struct {
 }
 
 // NewWebPConverter 创建WebP转换器
-func NewWebPConverter() *WebPConverter {
+func NewWebPConverter(enabled bool) *WebPConverter {
 	return &WebPConverter{
+		enabled:   enabled,
 		semaphore: make(chan struct{}, 5), // 最多5个WebP转换并发（CPU密集）
 	}
 }
@@ -49,6 +51,11 @@ func (wc *WebPConverter) storeUACache(key string, value bool) {
 
 // ShouldConvertToWebP 判断是否应该转换为WebP格式
 func (wc *WebPConverter) ShouldConvertToWebP(contentType, userAgent, acceptHeader string) bool {
+	// 如果WebP功能未启用，直接返回false
+	if !wc.enabled {
+		return false
+	}
+
 	// 只处理图片类型
 	if !strings.HasPrefix(contentType, "image/") {
 		return false

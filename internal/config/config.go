@@ -5,33 +5,36 @@ import (
 	"encoding/hex"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
 	Port          string
-	DataDir       string // 数据存储目录
-	CacheDir      string // 缓存文件目录
+	RedisURL      string
 	CacheTTL      time.Duration
 	AdminUsername string
 	AdminPassword string
 	SessionTTL    time.Duration
 	APIDomains    []string // API 服务域名列表（不缓存、支持 WebSocket/SSE）
+	WebPEnabled   bool     // WebP 转换功能开关
 }
 
 func Load() Config {
 	// PORT default 8080 (user preference)
 	port := getenv("PORT", "8080")
 
-	// 数据目录配置
-	dataDir := getenv("DATA_DIR", "./data")
-	cacheDir := getenv("CACHE_DIR", "./data/cache")
+	// Redis URL
+	redisURL := getenv("REDIS_URL", "redis://localhost:6379/0")
 
 	ttlSeconds := getenvInt("CACHE_TTL_SECONDS", 43200)          // 12h
 	sessionTTLSeconds := getenvInt("SESSION_TTL_SECONDS", 86400) // 24h
 
 	adminUser := getenv("ADMIN_USERNAME", "admin")
 	adminPass := getenv("ADMIN_PASSWORD", "cdnproxy123!")
+
+	// WebP 功能开关（默认关闭）
+	webpEnabled := getenvBool("WEBP_ENABLED", false)
 
 	// 默认的 API 域名列表（支持环境变量自定义）
 	apiDomains := []string{
@@ -57,14 +60,24 @@ func Load() Config {
 
 	return Config{
 		Port:          port,
-		DataDir:       dataDir,
-		CacheDir:      cacheDir,
+		RedisURL:      redisURL,
 		CacheTTL:      time.Duration(ttlSeconds) * time.Second,
 		AdminUsername: adminUser,
 		AdminPassword: adminPass,
 		SessionTTL:    time.Duration(sessionTTLSeconds) * time.Second,
 		APIDomains:    apiDomains,
+		WebPEnabled:   webpEnabled,
 	}
+}
+
+func getenvBool(key string, def bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	// 支持 true/false, 1/0, yes/no, on/off
+	v = strings.ToLower(strings.TrimSpace(v))
+	return v == "true" || v == "1" || v == "yes" || v == "on"
 }
 
 func splitAndTrim(s, sep string) []string {

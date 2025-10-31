@@ -13,13 +13,22 @@ import (
 
 	"cdnproxy/internal/config"
 	"cdnproxy/internal/storage"
+
+	redis "github.com/redis/go-redis/v9"
 )
 
 const sessionCookieName = "cp_session"
 
+// SessionStore 会话存储接口
+type SessionStore interface {
+	Set(token, value string) error
+	Exists(token string) bool
+	Delete(token string) error
+}
+
 type Server struct {
 	cfg            config.Config
-	sessionStore   *storage.FileSessionStore
+	sessionStore   SessionStore
 	whitelistStore WhitelistStore
 	configStore    ConfigStore
 	tplLogin       *template.Template
@@ -48,16 +57,12 @@ type ProxyManager interface {
 	GetProviderCount() int
 }
 
-func NewServer(cfg config.Config, whitelistStore WhitelistStore, configStore ConfigStore) (*Server, error) {
-	sessionStore, err := storage.NewFileSessionStore(cfg.DataDir, cfg.SessionTTL)
-	if err != nil {
-		return nil, err
-	}
-
+func NewServer(cfg config.Config, redisClient *redis.Client, whitelistStore WhitelistStore, configStore ConfigStore) (*Server, error) {
+	sessionStore := storage.NewRedisSessionStore(redisClient, cfg.SessionTTL)
 	return NewServerWithSessionStore(cfg, whitelistStore, configStore, sessionStore)
 }
 
-func NewServerWithSessionStore(cfg config.Config, whitelistStore WhitelistStore, configStore ConfigStore, sessionStore *storage.FileSessionStore) (*Server, error) {
+func NewServerWithSessionStore(cfg config.Config, whitelistStore WhitelistStore, configStore ConfigStore, sessionStore SessionStore) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		sessionStore:   sessionStore,
