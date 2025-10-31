@@ -76,9 +76,9 @@ func NewHandler(cfg config.Config, cacheStore cache.CacheInterface, whitelistSto
 		MaxIdleConnsPerHost:   25,               // 降低到合理值
 		MaxConnsPerHost:       100,              // 添加限制！
 		IdleConnTimeout:       30 * time.Second, // 缩短空闲时间
-		TLSHandshakeTimeout:   5 * time.Second,  // 缩短
+		TLSHandshakeTimeout:   10 * time.Second, // TLS握手超时
 		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second, // 缩短
+		ResponseHeaderTimeout: 60 * time.Second, // 等待响应头超时（增加到60秒，适配大文件）
 		// 启用 HTTP/2，对多路复用和头部压缩有帮助
 		DisableCompression: true, // 禁用自动压缩，避免上游返回 gzip 导致问题，我们自己处理压缩
 		// 降低缓冲区，减少内存使用
@@ -100,7 +100,7 @@ func NewHandler(cfg config.Config, cacheStore cache.CacheInterface, whitelistSto
 		whitelistStore: whitelistStore,
 		configStore:    configStore,
 		counterStore:   counterStore,
-		httpClient:     &http.Client{Transport: tr, Timeout: 30 * time.Second}, // CDN请求客户端
+		httpClient:     &http.Client{Transport: tr, Timeout: 3 * time.Minute}, // CDN请求客户端（3分钟超时）
 		apiClient: &http.Client{ // API请求专用客户端（长超时）
 			Transport: tr,
 			Timeout:   5 * time.Minute,
