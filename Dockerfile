@@ -21,6 +21,7 @@ COPY --from=build /bin/cdnproxy /cdnproxy
 # 环境变量
 ENV PORT=8080
 ENV WEBP_ENABLED=false
+ENV ADMIN_PASSWORD=admin123
 
 EXPOSE 8080
 ENTRYPOINT ["/cdnproxy"]
