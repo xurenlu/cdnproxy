@@ -31,7 +31,7 @@ var (
 
 type Handler struct {
 	cfg              config.Config
-	cache            *cache.DiskCache
+	cache            cache.CacheInterface
 	whitelistStore   WhitelistStore
 	httpClient       *http.Client
 	apiClient        *http.Client // API专用客户端（长超时）
@@ -60,7 +60,7 @@ type CounterStore interface {
 	IncrementReferrerCount(ctx context.Context, host string) (int64, error)
 }
 
-func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore WhitelistStore, configStore ConfigStore, counterStore CounterStore) http.Handler {
+func NewHandler(cfg config.Config, cacheStore cache.CacheInterface, whitelistStore WhitelistStore, configStore ConfigStore, counterStore CounterStore) http.Handler {
 	// 优化 TCP 参数，适配跨境大文件传输
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
@@ -91,12 +91,12 @@ func NewHandler(cfg config.Config, diskCache *cache.DiskCache, whitelistStore Wh
 	// 初始化AI API代理处理器
 	aiAPIProxy := NewAIAPIProxy(residentialProxy)
 
-	// 初始化WebP转换器
-	webpConverter := NewWebPConverter()
+	// 初始化WebP转换器（根据配置决定是否启用）
+	webpConverter := NewWebPConverter(cfg.WebPEnabled)
 
 	return &Handler{
 		cfg:            cfg,
-		cache:          diskCache,
+		cache:          cacheStore,
 		whitelistStore: whitelistStore,
 		configStore:    configStore,
 		counterStore:   counterStore,

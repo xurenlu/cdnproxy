@@ -13,6 +13,12 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
+// CacheInterface 缓存接口，支持多种缓存实现
+type CacheInterface interface {
+	Get(ctx context.Context, key string) (*Entry, error)
+	Set(ctx context.Context, key string, e *Entry, ttl time.Duration) error
+}
+
 type Cache struct {
 	client *redis.Client
 }

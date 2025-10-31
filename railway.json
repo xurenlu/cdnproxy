@@ -8,12 +8,12 @@
   },
   "env": {
     "PORT": "8080",
-    "DATA_DIR": "/data",
-    "CACHE_DIR": "/data/cache",
+    "REDIS_URL": "@redis_url",
     "CACHE_TTL_SECONDS": "43200",
     "SESSION_TTL_SECONDS": "86400",
     "ADMIN_USERNAME": "admin",
-    "ADMIN_PASSWORD": "cdnproxy123!"
+    "ADMIN_PASSWORD": "cdnproxy123!",
+    "WEBP_ENABLED": "false"
   }
 }
 
