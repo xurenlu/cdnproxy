@@ -118,7 +118,7 @@ func (aap *AIAPIProxy) detectAPIType(upstreamURL string) string {
 func (aap *AIAPIProxy) proxyWithoutResidentialIP(w http.ResponseWriter, r *http.Request, upstreamURL string) error {
 	// 创建普通HTTP客户端
 	client := &http.Client{
-		Timeout: 120 * time.Second,
+		Timeout: 5 * time.Minute, // AI API请求可能需要较长时间，设置为5分钟
 	}
 
 	// 创建上游请求

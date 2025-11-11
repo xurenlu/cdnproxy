@@ -161,15 +161,16 @@ func (rpm *ResidentialProxyManager) CreateHTTPClient(proxy *providers.Residentia
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Minute, // 等待响应头的超时时间，设置为5分钟
 	}
 
 	return &http.Client{
 		Transport: transport,
-		Timeout:   60 * time.Second,
+		Timeout:   5 * time.Minute, // AI API请求可能需要较长时间，设置为5分钟
 	}, nil
 }
 

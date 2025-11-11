@@ -99,9 +99,9 @@ func main() {
 		Addr:              ":" + cfg.Port,
 		Handler:           loggingMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,  // 添加读取超时
-		WriteTimeout:      30 * time.Second,  // 添加写入超时
-		IdleTimeout:       60 * time.Second,  // 缩短空闲超时
+		ReadTimeout:       10 * time.Minute,  // 支持长连接请求（API请求可能需要5分钟，SSE流式响应可能需要10分钟）
+		WriteTimeout:      10 * time.Minute,  // 支持长连接响应（API响应可能需要5分钟，SSE流式响应可能需要10分钟）
+		IdleTimeout:       60 * time.Second,  // 空闲超时保持较短，避免资源浪费
 	}
 
 	go func() {
