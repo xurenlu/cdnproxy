@@ -61,10 +61,22 @@ func (h *Handler) proxyAPIRequest(w http.ResponseWriter, r *http.Request, upstre
 		return
 	}
 
-	// 普通响应，直接复制
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		log.Printf("API proxy response copy error: %v", err)
+	// 普通响应，直接复制（检查 context 取消）
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(w, resp.Body)
+		done <- err
+	}()
+
+	select {
+	case err = <-done:
+		if err != nil {
+			log.Printf("API proxy response copy error: %v", err)
+		}
+	case <-r.Context().Done():
+		// 客户端取消请求，关闭响应体以停止 goroutine
+		resp.Body.Close()
+		log.Printf("API proxy request cancelled: %v", r.Context().Err())
 	}
 }
 

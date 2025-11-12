@@ -16,16 +16,12 @@ import (
 // AIAPIProxy AI API代理处理器
 type AIAPIProxy struct {
 	proxyManager *ResidentialProxyManager
-	httpClient   *http.Client
 }
 
 // NewAIAPIProxy 创建AI API代理处理器
 func NewAIAPIProxy(proxyManager *ResidentialProxyManager) *AIAPIProxy {
 	return &AIAPIProxy{
 		proxyManager: proxyManager,
-		httpClient: &http.Client{
-			Timeout: 120 * time.Second, // AI API通常需要更长的超时时间
-		},
 	}
 }
 
@@ -80,12 +76,25 @@ func (aap *AIAPIProxy) ProxyAIRequest(w http.ResponseWriter, r *http.Request, up
 	// 设置状态码
 	w.WriteHeader(resp.StatusCode)
 
-	// 流式传输响应体
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		// 报告代理使用失败
+	// 流式传输响应体，检查 context 取消
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(w, resp.Body)
+		done <- err
+	}()
+
+	select {
+	case err = <-done:
+		if err != nil {
+			// 报告代理使用失败
+			aap.proxyManager.ReportUsage(proxy, false, latency)
+			return fmt.Errorf("failed to copy response body: %w", err)
+		}
+	case <-r.Context().Done():
+		// 客户端取消请求，关闭响应体以停止 goroutine
+		resp.Body.Close()
 		aap.proxyManager.ReportUsage(proxy, false, latency)
-		return fmt.Errorf("failed to copy response body: %w", err)
+		return r.Context().Err()
 	}
 
 	// 报告代理使用成功
@@ -143,10 +152,22 @@ func (aap *AIAPIProxy) proxyWithoutResidentialIP(w http.ResponseWriter, r *http.
 	// 设置状态码
 	w.WriteHeader(resp.StatusCode)
 
-	// 流式传输响应体
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to copy response body: %w", err)
+	// 流式传输响应体，检查 context 取消
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(w, resp.Body)
+		done <- err
+	}()
+
+	select {
+	case err = <-done:
+		if err != nil {
+			return fmt.Errorf("failed to copy response body: %w", err)
+		}
+	case <-r.Context().Done():
+		// 客户端取消请求，关闭响应体以停止 goroutine
+		resp.Body.Close()
+		return r.Context().Err()
 	}
 
 	return nil

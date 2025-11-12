@@ -97,7 +97,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           loggingMiddleware(mux),
+		Handler:           panicRecoveryMiddleware(loggingMiddleware(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       10 * time.Minute,  // 支持长连接请求（API请求可能需要5分钟，SSE流式响应可能需要10分钟）
 		WriteTimeout:      10 * time.Minute,  // 支持长连接响应（API响应可能需要5分钟，SSE流式响应可能需要10分钟）
@@ -121,6 +121,20 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("server shutdown error: %v", err)
 	}
+}
+
+// panicRecoveryMiddleware 全局 panic 恢复中间件，防止单个请求的 panic 导致整个服务崩溃
+func panicRecoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Printf("PANIC RECOVERED: %v, path: %s, method: %s", err, r.URL.Path, r.Method)
+				// 尝试返回 500 错误（如果响应头还没有写入）
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {
