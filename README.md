@@ -1,13 +1,15 @@
-# CDNProxy
+# CDNProxy v2.2
 
-一个用于在受限网络环境下代理访问公共 CDN 资源并进行**硬盘缓存**的 Go 服务，默认端口 8080。
+一个用于在受限网络环境下代理访问公共 CDN 资源和 AI API 服务的 Go 代理服务，默认端口 8080。
 
-## ✨ v2.0 重大更新
+## ✨ v2.2 版本特性
 
 - **完全移除 Redis 依赖**，改用硬盘文件缓存系统
 - **简化部署**，无需额外的 Redis 服务
 - **数据持久化**，缓存和配置自动保存到硬盘
 - **降低成本**，单个二进制文件即可运行
+- **API 代理支持**，支持 OpenAI、Claude、Poe 等 AI 服务
+- **WebSocket 和 SSE 支持**，完整支持实时通信和流式响应
 
 详细说明请查看 [README_DISK_CACHE.md](README_DISK_CACHE.md)
 
@@ -38,18 +40,28 @@
 ## 路由
 
 - `/healthz` 健康检查
+- `/docs` 使用文档（公开访问）
 - `/admin/login` 登录页
 - `/admin/` 管理台（需登录）
 
 ## 环境变量
 
+### 基础配置
 - `PORT`：服务端口，默认 8080
 - `DATA_DIR`：数据存储目录，默认 ./data
 - `CACHE_DIR`：缓存文件目录，默认 ./data/cache
 - `CACHE_TTL_SECONDS`：缓存 TTL，默认 43200（12h）
 - `SESSION_TTL_SECONDS`：管理登录会话 TTL，默认 86400（24h）
-- `ADMIN_USERNAME` / `ADMIN_PASSWORD`：管理登录凭据
+
+### 管理配置
+- `ADMIN_USERNAME`：管理员用户名，默认 admin
+- `ADMIN_PASSWORD`：管理员密码，默认 cdnproxy123!（**生产环境请务必修改**）
+
+### API 代理配置
 - `API_DOMAINS`：额外的 API 域名（逗号分隔），如 `api.example.com,api2.example.com`
+
+### 功能开关
+- `WEBP_ENABLED`：启用 WebP 图片转换，默认 false（可选值：true/false, 1/0, yes/no, on/off）
 
 ## 启动
 
@@ -188,9 +200,20 @@ curl https://cdnproxy.shifen.de/api.openai.com/v1/chat/completions \
 
 可通过环境变量 `API_DOMAINS` 添加更多域名（逗号分隔）。
 
-若访问被阻止，请确保：
-- 使用非常见浏览器 UA，或
-- Referer 为 IP/localhost 开发环境，或
-- 将站点域名后缀加入白名单（在 `/admin/` 操作）
+## 访问控制
+
+为防止服务被滥用，CDN 代理请求会进行访问控制检查。若访问被阻止，请确保：
+
+1. **使用非常见浏览器 User-Agent**（如 curl、wget、自定义 UA）
+2. **Referer 为 IP 地址或本地开发环境**（localhost、127.0.0.1 等）
+3. **将站点域名后缀加入白名单**（在 `/admin/` 管理台操作）
+
+**注意**：API 代理请求不受访问控制限制，由上游 API 服务自己控制。
+
+## 更多文档
+
+- 📖 [使用文档](/docs) - 访问 `/docs` 路由查看详细使用说明
+- 📚 [完整文档](docs/zh/README.md) - 查看完整的中文文档
+- 🔄 [更新日志](CHANGELOG.md) - 查看版本更新历史
 
 
