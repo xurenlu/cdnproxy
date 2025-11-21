@@ -181,6 +181,10 @@ func (aap *AIAPIProxy) copyHeaders(dst, src http.Header) {
 		if lowerK == "host" || lowerK == "connection" || lowerK == "upgrade" {
 			continue
 		}
+		// 跳过代理相关的内部头，避免透传客户端真实 IP 给上游服务器
+		if lowerK == "x-forwarded-for" || lowerK == "x-real-ip" {
+			continue
+		}
 		dst[k] = v
 	}
 }
