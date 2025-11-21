@@ -1,75 +1,74 @@
 # CDNProxy 中文文档
 
-欢迎使用 CDNProxy 中文文档！
+## 📚 文档导航
 
-## 📚 **文档导航**
+### 🚀 快速开始
+- **[快速开始](01-getting-started/README.md)** - 安装、配置、快速上手
 
-### 1. [快速开始](01-getting-started/README.md)
-- 项目简介
-- 安装指南
-- 配置说明
-- 快速上手
+### 📖 用户指南
+- **[API 代理使用](02-user-guide/api-proxy.md)** - AI API 代理使用方法
+- **[住宅 IP 代理](02-user-guide/residential-proxy.md)** - 住宅 IP 代理配置
+- **[视频支持](02-user-guide/video-support.md)** - 视频流代理支持
+- **[扩展提供者](02-user-guide/extended-providers.md)** - 添加自定义代理提供者
 
-### 2. [用户指南](02-user-guide/)
-- [API代理使用](02-user-guide/api-proxy.md)
-- [住宅IP代理](02-user-guide/residential-proxy.md)
-- [视频支持](02-user-guide/video-support.md)
-- [扩展提供者](02-user-guide/extended-providers.md)
-- [住宅IP挑战](02-user-guide/residential-ip-challenge.md)
+### 🔧 API 参考
+- **[住宅 IP 代理 API](03-api-reference/residential-proxy-api.md)** - API 接口文档
 
-### 3. [API参考](03-api-reference/)
-- [住宅IP代理API](03-api-reference/residential-proxy-api.md)
+### 🚢 部署运维
+- **[Docker 部署](04-deployment/docker.md)** - Docker 容器部署
+- **[云函数部署](04-deployment/serverless.md)** - Serverless 部署
+- **[运维指南](04-deployment/operations.md)** - 运维和监控
 
-### 4. [部署运维](04-deployment/)
-- [Docker部署](04-deployment/docker.md)
-- [云函数部署](04-deployment/serverless.md)
-- [运维指南](04-deployment/operations.md)
+### ⚡ 高级功能
+- **[性能优化](05-advanced/performance.md)** - 性能调优指南
+- **[稳定性修复](05-advanced/stability-fixes.md)** - 稳定性改进
 
-### 5. [高级功能](05-advanced/)
-- [性能优化](05-advanced/performance.md)
-- [优化应用](05-advanced/optimization-applied.md)
-- [优化完成](05-advanced/optimization-completed.md)
-- [稳定性审计](05-advanced/stability-audit.md)
-- [最终优化](05-advanced/final-optimization.md)
-- [优化总结](05-advanced/optimization-summary.md)
-- [稳定性修复](05-advanced/stability-fixes.md)
+### 🔍 故障排查
+- **[关键问题修复](06-troubleshooting/critical-issues.md)** - 常见问题解决
+- **[性能问题](06-troubleshooting/critical-performance.md)** - 性能问题排查
 
-### 6. [故障排查](06-troubleshooting/)
-- [关键性能问题](06-troubleshooting/critical-performance.md)
-- [关键问题修复](06-troubleshooting/critical-issues.md)
+### 🏗️ 架构设计
+- **[架构文档](07-architecture/ARCHITECTURE.md)** - 系统架构说明
 
-### 7. [架构设计](07-architecture/)
-- [架构改进](07-architecture/improvements.md)
-- [文件拆分计划](07-architecture/file-split-plan.md)
-- [项目总结](07-architecture/summary.md)
+## 🎯 快速查找
 
-### 8. [商业分析](08-business/)
-- [商业模式](08-business/business-model.md)
-- [市场分析](08-business/market-analysis.md)
-- [竞争优势](08-business/competitive.md)
+根据需求快速定位：
 
-### 9. [发展规划](09-roadmap/)
-- [路线图](09-roadmap/roadmap.md)
-- [边缘计算策略](09-roadmap/edge-computing.md)
+| 需求 | 文档 |
+|------|------|
+| 首次使用 | [快速开始](01-getting-started/README.md) |
+| 代理 AI API | [API 代理使用](02-user-guide/api-proxy.md) |
+| 配置住宅 IP | [住宅 IP 代理](02-user-guide/residential-proxy.md) |
+| Docker 部署 | [Docker 部署](04-deployment/docker.md) |
+| 性能优化 | [性能优化](05-advanced/performance.md) |
+| 遇到问题 | [故障排查](06-troubleshooting/critical-issues.md) |
 
-## 🚀 **快速导航**
+## 📋 核心概念
 
-根据你的需求选择对应的文档：
+### CDN 代理
+将 CDN 资源 URL 的域名部分替换为代理域名即可访问：
+```
+原始: https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js
+代理: https://your-proxy/cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js
+```
 
-- **新手**: 从 [快速开始](01-getting-started/README.md) 开始
-- **用户**: 查看 [用户指南](02-user-guide/)
-- **开发者**: 查看 [API参考](03-api-reference/)
-- **运维**: 查看 [部署运维](04-deployment/)
-- **高级用户**: 查看 [高级功能](05-advanced/)
-- **遇到问题**: 查看 [故障排查](06-troubleshooting/)
+### API 代理
+同样替换域名，支持所有 HTTP 方法、WebSocket 和 SSE：
+```
+原始: https://api.openai.com/v1/chat/completions
+代理: https://your-proxy/api.openai.com/v1/chat/completions
+```
 
-## 📖 **文档说明**
+### 访问控制
+- CDN 代理：需要满足 User-Agent、Referer 或白名单条件
+- API 代理：不受访问控制限制
 
-- 所有文档均为 Markdown 格式
-- 支持 GitHub Pages 渲染
-- 持续更新维护
-- 欢迎提交问题和建议
+### 缓存策略
+- CDN 资源：默认缓存 12 小时
+- API 请求：不缓存，实时请求
 
-## 🌐 **其他语言**
+## 🔗 相关链接
 
 - [English Documentation](../en/README.md)
+- [GitHub Repository](https://github.com/xurenlu/cdnproxy)
+- [更新日志](../../CHANGELOG.md)

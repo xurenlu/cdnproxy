@@ -1,219 +1,139 @@
 # CDNProxy v2.2
 
-一个用于在受限网络环境下代理访问公共 CDN 资源和 AI API 服务的 Go 代理服务，默认端口 8080。
+一个用于在受限网络环境下代理访问公共 CDN 资源和 AI API 服务的 Go 代理服务。
 
-## ✨ v2.2 版本特性
+## 🎯 核心功能
 
-- **完全移除 Redis 依赖**，改用硬盘文件缓存系统
-- **简化部署**，无需额外的 Redis 服务
-- **数据持久化**，缓存和配置自动保存到硬盘
-- **降低成本**，单个二进制文件即可运行
-- **API 代理支持**，支持 OpenAI、Claude、Poe 等 AI 服务
-- **WebSocket 和 SSE 支持**，完整支持实时通信和流式响应
+### CDN 代理
+- **路径代理**: `/host/path` → `https://host/path`
+- **智能缓存**: 硬盘缓存，默认 12 小时 TTL
+- **访问控制**: 基于 User-Agent、Referer 和白名单
+- **流式传输**: 支持大文件和 Range 请求
 
-详细说明请查看 [README_DISK_CACHE.md](README_DISK_CACHE.md)
+### API 代理
+- **AI 服务**: 支持 OpenAI、Claude、Gemini、Poe 等
+- **实时通信**: 支持 WebSocket 和 SSE 流式响应
+- **无限制**: 无大小限制、无超时限制
+- **自动识别**: 自动识别 API 域名，无需配置
 
-## 功能
+## 🚀 快速开始
 
-### CDN 代理功能
-- 基于路径的反向代理：/host/path → https://host/path
-- 访问控制策略：
-  1. 非常见浏览器 User-Agent 允许
-  2. Referer 为 IP 或本地开发（localhost 等）允许
-  3. Referer 为域名且后缀在白名单中允许
-- **硬盘缓存** GET/HEAD 响应（默认 12 小时）
-- 大文件流式传输（>5MB），支持 Range 请求
-- /admin 管理界面：登录后增删白名单后缀
-
-### API 代理功能 (v2.1 新增)
-- 支持代理 OpenAI、Claude、Poe 等 AI 服务的 API 请求
-- **不缓存** API 响应（每次都是实时请求）
-- 支持 **WebSocket** 连接（实时双向通信）
-- 支持 **SSE (Server-Sent Events)** 流式响应（如 OpenAI 的 stream 模式）
-- 支持 **POST 大数据**（无大小限制）
-- 支持**长时间连接**（无超时限制）
-- 自动识别 API 域名，无需额外配置
-- API 请求不受访问控制限制（由上游 API 服务自己控制）
-
-默认管理员：`admin` / `cdnproxy123!`，可通过环境变量覆盖。
-
-## 路由
-
-- `/healthz` 健康检查
-- `/docs` 使用文档（公开访问）
-- `/admin/login` 登录页
-- `/admin/` 管理台（需登录）
-
-## 环境变量
-
-### 基础配置
-- `PORT`：服务端口，默认 8080
-- `DATA_DIR`：数据存储目录，默认 ./data
-- `CACHE_DIR`：缓存文件目录，默认 ./data/cache
-- `CACHE_TTL_SECONDS`：缓存 TTL，默认 43200（12h）
-- `SESSION_TTL_SECONDS`：管理登录会话 TTL，默认 86400（24h）
-
-### 管理配置
-- `ADMIN_USERNAME`：管理员用户名，默认 admin
-- `ADMIN_PASSWORD`：管理员密码，默认 cdnproxy123!（**生产环境请务必修改**）
-
-### API 代理配置
-- `API_DOMAINS`：额外的 API 域名（逗号分隔），如 `api.example.com,api2.example.com`
-
-### 功能开关
-- `WEBP_ENABLED`：启用 WebP 图片转换，默认 false（可选值：true/false, 1/0, yes/no, on/off）
-
-## 启动
+### 安装运行
 
 ```bash
 # 编译
 go build -o cdnproxy .
 
-# 运行（会自动创建 data 目录）
+# 运行（默认端口 8080）
 ./cdnproxy
 ```
 
-或直接运行：
+### Docker 部署
 
 ```bash
-go mod tidy
-go run ./...
-```
-
-本地测试示例：
-
-```bash
-# 本地开发测试
-curl -i http://localhost:8080/cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
-
-# 使用线上服务测试
-curl -i https://cdnproxy.shifen.de/cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
-```
-
-## Docker 部署
-
-```bash
-# 使用 docker-compose（推荐）
 docker-compose up -d
-
-# 或手动运行
-docker build -t cdnproxy .
-docker run -d \
-  -p 8080:8080 \
-  -v $(pwd)/data:/data \
-  -e ADMIN_PASSWORD=your_password \
-  cdnproxy
+# 或
+docker run -d -p 8080:8080 -v $(pwd)/data:/data -e ADMIN_PASSWORD=your_password cdnproxy
 ```
 
-**重要**：使用 `-v` 挂载数据目录以持久化缓存！
-
-## Railway 部署
-
-支持 Dockerfile 构建，或直接使用 `railway.json`。
-
-步骤：
-1. 新建 Railway 项目
-2. 连接本仓库后部署，构建方式选择 Dockerfile
-3. 设置环境变量（Railway 会自动挂载持久化卷）：
-   - `ADMIN_PASSWORD`（必须修改！）
-   - 其他可选配置见上方
-4. 自定义域名：将域名指向 Railway 提供的地址
-
-## Fly.io 部署（推荐亚洲节点）
-
-```bash
-# 安装 flyctl
-brew install flyctl
-
-# 登录并部署
-flyctl auth login
-flyctl launch --region hkg  # 香港节点
-flyctl secrets set ADMIN_PASSWORD="your_password"
-flyctl deploy
-```
-
-详细指南：[DEPLOY_FLYIO.md](DEPLOY_FLYIO.md)
-
-## 使用示例
-
-本项目已部署在 `https://cdnproxy.shifen.de`，可直接使用。
+## 📖 使用方法
 
 ### CDN 资源代理
 
-**原始 URL:**
-```
-https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
-```
+**规则**: 将原始 URL 的 `https://` 替换为 `https://your-proxy-domain/`
 
-**通过本代理访问:**
+```bash
+# 原始: https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
+# 代理: https://your-proxy-domain/cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
 ```
-https://cdnproxy.shifen.de/cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css
-```
-
-**使用方法：** 将原始 CDN URL 中的 `https://` 替换为 `https://cdnproxy.shifen.de/` 即可。
 
 ### API 服务代理
 
-**OpenAI API 示例:**
-
-原始请求：
-```bash
-curl https://api.openai.com/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "stream": true
-  }'
-```
-
-通过代理：
-```bash
-curl https://cdnproxy.shifen.de/api.openai.com/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "stream": true
-  }'
-```
-
-**Claude API 示例:**
+**规则**: 同样将 `https://` 替换为代理域名
 
 ```bash
-# 原始: https://api.anthropic.com/v1/messages
-# 代理: https://cdnproxy.shifen.de/api.anthropic.com/v1/messages
+# OpenAI API
+curl https://your-proxy-domain/api.openai.com/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -d '{"model":"gpt-4","messages":[{"role":"user","content":"Hello!"}]}'
+
+# Claude API
+curl https://your-proxy-domain/api.anthropic.com/v1/messages \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -d '{"model":"claude-3-opus","messages":[{"role":"user","content":"Hello!"}]}'
 ```
 
-**支持的 API 域名：**
-- `api.openai.com` - OpenAI API
-- `api.anthropic.com` - Claude API
-- `claude.ai` - Claude Web
+**支持的 API 域名**:
+- `api.openai.com` - OpenAI
+- `api.anthropic.com` - Claude
 - `poe.com` / `api.poe.com` - Poe
-- `gemini.google.com` - Google Gemini
-- `generativelanguage.googleapis.com` - Google AI
+- `generativelanguage.googleapis.com` - Google Gemini
 - `api.cohere.ai` - Cohere
 - `api.together.xyz` - Together AI
 - `api.groq.com` - Groq
 
 可通过环境变量 `API_DOMAINS` 添加更多域名（逗号分隔）。
 
-## 访问控制
+## ⚙️ 配置
 
-为防止服务被滥用，CDN 代理请求会进行访问控制检查。若访问被阻止，请确保：
+### 环境变量
 
-1. **使用非常见浏览器 User-Agent**（如 curl、wget、自定义 UA）
-2. **Referer 为 IP 地址或本地开发环境**（localhost、127.0.0.1 等）
-3. **将站点域名后缀加入白名单**（在 `/admin/` 管理台操作）
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `PORT` | 服务端口 | 8080 |
+| `DATA_DIR` | 数据目录 | ./data |
+| `CACHE_TTL_SECONDS` | 缓存 TTL | 43200 (12h) |
+| `ADMIN_USERNAME` | 管理员用户名 | admin |
+| `ADMIN_PASSWORD` | 管理员密码 | cdnproxy123! |
+| `API_DOMAINS` | 额外 API 域名（逗号分隔） | - |
+| `WEBP_ENABLED` | 启用 WebP 转换 | false |
 
-**注意**：API 代理请求不受访问控制限制，由上游 API 服务自己控制。
+### 管理界面
 
-## 更多文档
+访问 `/admin/` 进行白名单管理（默认账号：`admin` / `cdnproxy123!`）
 
-- 📖 [使用文档](/docs) - 访问 `/docs` 路由查看详细使用说明
-- 📚 [完整文档](docs/zh/README.md) - 查看完整的中文文档
-- 🔄 [更新日志](CHANGELOG.md) - 查看版本更新历史
+## 🔒 访问控制
 
+CDN 代理请求会进行访问控制，满足以下任一条件即可通过：
 
+1. **非常见浏览器 User-Agent**（如 curl、wget）
+2. **Referer 为 IP 或本地开发**（localhost、127.0.0.1）
+3. **域名在白名单中**（在 `/admin/` 管理）
+
+**注意**: API 代理请求不受访问控制限制。
+
+## 📚 文档
+
+- 📖 [使用文档](/docs) - 访问 `/docs` 路由查看
+- 📚 [完整文档](docs/zh/README.md) - 中文文档
+- 🔄 [更新日志](CHANGELOG.md) - 版本历史
+
+## 🌐 部署
+
+### Railway
+1. 连接仓库，选择 Dockerfile 构建
+2. 设置 `ADMIN_PASSWORD` 环境变量
+3. 部署完成
+
+### Fly.io
+```bash
+flyctl launch --region hkg
+flyctl secrets set ADMIN_PASSWORD="your_password"
+flyctl deploy
+```
+
+详细指南：[DEPLOY_FLYIO.md](DEPLOY_FLYIO.md)
+
+## 💡 技术特性
+
+- ✅ **无 Redis 依赖**: 使用硬盘文件缓存
+- ✅ **数据持久化**: 缓存和配置自动保存
+- ✅ **单二进制部署**: 无需额外依赖
+- ✅ **智能缓存**: 基于内容类型的缓存策略
+- ✅ **流式传输**: 支持大文件和实时流
+
+## 📝 版本历史
+
+- **v2.2**: 移除 Redis 依赖，改用硬盘缓存
+- **v2.1**: 新增 API 代理功能，支持 WebSocket 和 SSE
+- **v2.0**: 重构架构，优化性能

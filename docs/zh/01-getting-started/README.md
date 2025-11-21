@@ -1,121 +1,140 @@
 # 快速开始
 
-欢迎使用 CDNProxy！
+## 📖 什么是 CDNProxy？
 
-## 📖 **什么是 CDNProxy？**
+CDNProxy 是一个高性能的 CDN 和 AI API 代理服务，用于在受限网络环境下访问公共资源。
 
-CDNProxy 是一个高性能的 CDN 和 API 代理服务，具有以下特性：
+**核心特性**:
+- ✅ CDN 资源代理（支持缓存）
+- ✅ AI API 代理（OpenAI、Claude、Gemini 等）
+- ✅ WebSocket 和 SSE 支持
+- ✅ 硬盘缓存（无需 Redis）
+- ✅ 访问控制和白名单管理
 
-- ✅ **CDN 代理**: 加速全球 CDN 资源访问
-- ✅ **API 代理**: 支持 AI API 代理，包括 OpenAI、Claude、Gemini
-- ✅ **住宅IP代理**: 支持多个住宅IP提供者
-- ✅ **智能优化**: AI 驱动的智能缓存和路由
-- ✅ **性能监控**: 完整的性能指标和监控
-- ✅ **成本优化**: 智能成本控制和优化
-
-## 🚀 **快速安装**
+## 🚀 安装运行
 
 ### 方式一：直接运行
 
 ```bash
-# 下载最新版本
-wget https://github.com/xurenlu/cdnproxy/releases/latest/download/cdnproxy
+# 编译
+go build -o cdnproxy .
 
-# 添加执行权限
-chmod +x cdnproxy
-
-# 运行
+# 运行（默认端口 8080）
 ./cdnproxy
 ```
 
 ### 方式二：Docker
 
 ```bash
-# 拉取镜像
-docker pull cdnproxy/cdnproxy:latest
+# 使用 docker-compose
+docker-compose up -d
 
-# 运行容器
-docker run -d -p 8080:8080 cdnproxy/cdnproxy:latest
+# 或手动运行
+docker run -d -p 8080:8080 \
+  -v $(pwd)/data:/data \
+  -e ADMIN_PASSWORD=your_password \
+  cdnproxy
 ```
 
 ### 方式三：源码编译
 
 ```bash
-# 克隆代码
 git clone https://github.com/xurenlu/cdnproxy.git
 cd cdnproxy
-
-# 编译
-go build -o cdnproxy
-
-# 运行
+go build -o cdnproxy .
 ./cdnproxy
 ```
 
-## ⚙️ **配置**
+## ⚙️ 基础配置
 
 ### 环境变量
 
 ```bash
-# 端口配置
+# 端口（默认 8080）
 export PORT=8080
 
-# 数据目录
+# 数据目录（默认 ./data）
 export DATA_DIR=./data
 
-# Admin 配置
-export ADMIN_USERNAME=admin
-export ADMIN_PASSWORD=your_password
+# 管理员密码（必须修改！）
+export ADMIN_PASSWORD=your_secure_password
 
-# 住宅IP代理配置（可选）
-export BRIGHT_DATA_API_KEY=your_api_key
-export BRIGHT_DATA_USERNAME=your_username
-export BRIGHT_DATA_PASSWORD=your_password
+# 缓存 TTL（默认 12 小时）
+export CACHE_TTL_SECONDS=43200
 ```
 
-### 配置文件
+### 管理界面
 
-创建 `config.yml`:
+访问 `http://localhost:8080/admin/` 进行白名单管理
 
-```yaml
-port: 8080
-data_dir: ./data
-admin:
-  username: admin
-  password: your_password
-residential_proxy:
-  providers:
-    bright_data:
-      enabled: true
-      api_key: your_api_key
-```
+默认账号：`admin` / `cdnproxy123!`（生产环境请修改）
 
-## 🎯 **使用示例**
+## 🎯 使用示例
 
-### CDN 代理
+### CDN 资源代理
+
+**规则**: 将原始 URL 的 `https://` 替换为 `https://your-proxy-domain/`
 
 ```bash
-# 代理 jsDelivr CDN
-curl "https://cdnproxy.shifen.de/cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"
+# 原始 URL
+https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js
+
+# 通过代理访问
+https://your-proxy-domain/cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js
 ```
 
-### API 代理
+### AI API 代理
+
+**规则**: 同样替换域名，保持所有请求头和参数
 
 ```bash
 # OpenAI API
-curl "https://cdnproxy.shifen.de/api.openai.com/v1/chat/completions" \
-  -H "Authorization: Bearer YOUR_KEY" \
-  -d '{"model":"gpt-4","messages":[{"role":"user","content":"Hello!"}]}'
+curl https://your-proxy-domain/api.openai.com/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+
+# Claude API
+curl https://your-proxy-domain/api.anthropic.com/v1/messages \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-opus",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
 ```
 
-## 📚 **下一步**
+## 🔒 访问控制
 
-- 查看 [用户指南](../02-user-guide/)
-- 了解 [API参考](../03-api-reference/)
-- 查看 [部署指南](../04-deployment/)
+CDN 代理请求需要满足以下任一条件：
 
-## 💡 **需要帮助？**
+1. **非常见浏览器 User-Agent**（如 curl、wget）
+2. **Referer 为 IP 或本地开发**（localhost、127.0.0.1）
+3. **域名在白名单中**（在 `/admin/` 管理台添加）
 
-- 查看 [故障排查](../06-troubleshooting/)
-- 提交 Issue: https://github.com/xurenlu/cdnproxy/issues
-- 查看 [FAQ](../06-troubleshooting/README.md)
+**注意**: API 代理请求不受访问控制限制。
+
+## 📚 下一步
+
+- 📖 [API 代理使用指南](../02-user-guide/api-proxy.md)
+- 🏠 [住宅 IP 代理配置](../02-user-guide/residential-proxy.md)
+- 🚢 [部署指南](../04-deployment/docker.md)
+- ⚡ [性能优化](../05-advanced/performance.md)
+
+## 💡 常见问题
+
+**Q: 如何添加自定义 API 域名？**  
+A: 设置环境变量 `API_DOMAINS=api.example.com,api2.example.com`
+
+**Q: 缓存如何清理？**  
+A: 删除 `data/cache` 目录或通过管理界面操作
+
+**Q: 支持 WebSocket 吗？**  
+A: 支持，API 代理自动识别 WebSocket 升级请求
+
+**Q: 如何查看日志？**  
+A: 日志输出到标准输出，可通过 Docker logs 或重定向查看
