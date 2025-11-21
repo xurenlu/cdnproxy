@@ -46,12 +46,12 @@ export API_DOMAINS="api.example.com,api2.example.com"
 
 ### 基本原理
 
-将原始 API URL 中的 `https://` 替换为 `https://cdnproxy.shifen.de/` 即可。
+将原始 API URL 中的 `https://` 替换为 `https://cdnproxy.some.im/` 即可。
 
 **格式：**
 ```
 原始: https://api.example.com/v1/endpoint
-代理: https://cdnproxy.shifen.de/api.example.com/v1/endpoint
+代理: https://cdnproxy.some.im/api.example.com/v1/endpoint
 ```
 
 ## 使用示例
@@ -61,7 +61,7 @@ export API_DOMAINS="api.example.com,api2.example.com"
 #### 1.1 非流式请求
 
 ```bash
-curl https://cdnproxy.shifen.de/api.openai.com/v1/chat/completions \
+curl https://cdnproxy.some.im/api.openai.com/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{
@@ -76,7 +76,7 @@ curl https://cdnproxy.shifen.de/api.openai.com/v1/chat/completions \
 #### 1.2 流式请求 (SSE)
 
 ```bash
-curl https://cdnproxy.shifen.de/api.openai.com/v1/chat/completions \
+curl https://cdnproxy.some.im/api.openai.com/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{
@@ -92,7 +92,7 @@ curl https://cdnproxy.shifen.de/api.openai.com/v1/chat/completions \
 import openai
 
 # 方法1: 修改 api_base
-openai.api_base = "https://cdnproxy.shifen.de/api.openai.com/v1"
+openai.api_base = "https://cdnproxy.some.im/api.openai.com/v1"
 openai.api_key = "YOUR_API_KEY"
 
 # 方法2: 使用新版 OpenAI SDK
@@ -100,7 +100,7 @@ from openai import OpenAI
 
 client = OpenAI(
     api_key="YOUR_API_KEY",
-    base_url="https://cdnproxy.shifen.de/api.openai.com/v1"
+    base_url="https://cdnproxy.some.im/api.openai.com/v1"
 )
 
 # 非流式
@@ -132,7 +132,7 @@ const { Configuration, OpenAIApi } = require('openai');
 
 const configuration = new Configuration({
   apiKey: 'YOUR_API_KEY',
-  basePath: 'https://cdnproxy.shifen.de/api.openai.com/v1'
+  basePath: 'https://cdnproxy.some.im/api.openai.com/v1'
 });
 
 const openai = new OpenAIApi(configuration);
@@ -155,7 +155,7 @@ chat();
 #### 2.1 基本请求
 
 ```bash
-curl https://cdnproxy.shifen.de/api.anthropic.com/v1/messages \
+curl https://cdnproxy.some.im/api.anthropic.com/v1/messages \
   -H "Content-Type: application/json" \
   -H "x-api-key: YOUR_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
@@ -171,7 +171,7 @@ curl https://cdnproxy.shifen.de/api.anthropic.com/v1/messages \
 #### 2.2 流式请求
 
 ```bash
-curl https://cdnproxy.shifen.de/api.anthropic.com/v1/messages \
+curl https://cdnproxy.some.im/api.anthropic.com/v1/messages \
   -H "Content-Type: application/json" \
   -H "x-api-key: YOUR_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
@@ -190,7 +190,7 @@ import anthropic
 
 client = anthropic.Anthropic(
     api_key="YOUR_API_KEY",
-    base_url="https://cdnproxy.shifen.de/api.anthropic.com"
+    base_url="https://cdnproxy.some.im/api.anthropic.com"
 )
 
 # 非流式
@@ -216,7 +216,7 @@ with client.messages.stream(
 ### 3. Google Gemini API
 
 ```bash
-curl https://cdnproxy.shifen.de/generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=YOUR_API_KEY \
+curl https://cdnproxy.some.im/generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=YOUR_API_KEY \
   -H "Content-Type: application/json" \
   -d '{
     "contents": [{
@@ -230,7 +230,7 @@ curl https://cdnproxy.shifen.de/generativelanguage.googleapis.com/v1beta/models/
 ### 4. Groq API
 
 ```bash
-curl https://cdnproxy.shifen.de/api.groq.com/openai/v1/chat/completions \
+curl https://cdnproxy.some.im/api.groq.com/openai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{
@@ -248,7 +248,7 @@ curl https://cdnproxy.shifen.de/api.groq.com/openai/v1/chat/completions \
 ```javascript
 const WebSocket = require('ws');
 
-const ws = new WebSocket('wss://cdnproxy.shifen.de/poe.com/api/chat', {
+const ws = new WebSocket('wss://cdnproxy.some.im/poe.com/api/chat', {
   headers: {
     'Authorization': 'Bearer YOUR_TOKEN',
     'Origin': 'https://poe.com'

@@ -93,12 +93,12 @@
 
 #### CDN 代理（原有功能）
 ```bash
-https://cdnproxy.shifen.de/cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js
+https://cdnproxy.some.im/cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js
 ```
 
 #### API 代理（新功能）
 ```bash
-curl https://cdnproxy.shifen.de/api.openai.com/v1/chat/completions \
+curl https://cdnproxy.some.im/api.openai.com/v1/chat/completions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}]}'
 ```
