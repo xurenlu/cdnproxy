@@ -1,0 +1,21 @@
+# CDNProxy
+
+> CDNProxy 是轻量级反向代理，解决受限网络下访问公共 CDN（jsdelivr、unpkg）和 AI API（OpenAI、Claude）的问题。将原始 URL 的 https:// 替换为代理域名即可使用。
+
+## 核心用法
+
+- 路径格式: `/域名/路径` 代理到 `https://域名/路径`
+- CDN 示例: `{{BASE}}/cdn.jsdelivr.net/npm/bootstrap@5/dist/css/bootstrap.min.css`
+- API 示例: `{{BASE}}/api.openai.com/v1/chat/completions`（需 Bearer Token）
+
+## 文档
+
+- [使用说明]({{BASE}}/docs): 完整使用文档、CDN/API 示例、访问控制、缓存策略
+
+## 管理
+
+- [管理后台]({{BASE}}/admin/): 白名单、配置、统计（需登录）
+
+## Optional
+
+- [健康检查]({{BASE}}/healthz): 服务状态与资源监控

@@ -1,0 +1,19 @@
+# CDNProxy
+
+> CDN 与 AI API 反向代理服务。将原始 URL 的 https:// 替换为 {{BASE}}/ 即可代理访问。
+
+## 用法
+
+**CDN 代理**: `{{BASE}}/cdn.jsdelivr.net/npm/xxx` → `https://cdn.jsdelivr.net/npm/xxx`
+**API 代理**: `{{BASE}}/api.openai.com/v1/chat/completions` → OpenAI API
+
+规则：把目标 URL 的 `https://` 换成 `{{BASE}}/`
+
+## 支持的 API 域名
+
+api.openai.com, api.anthropic.com, claude.ai, poe.com, api.poe.com, gemini.google.com, generativelanguage.googleapis.com, api.cohere.ai, api.together.xyz, api.groq.com。可通过 API_DOMAINS 环境变量扩展。
+
+## 更多
+
+- 完整文档: /docs
+- 管理后台: /admin/

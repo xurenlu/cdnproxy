@@ -89,6 +89,10 @@ func main() {
 	// Docs page
 	mux.HandleFunc("/docs", docs.Handler())
 
+	// AI 文档：llm.txt / llms.txt
+	mux.HandleFunc("/llm.txt", docs.LLMTxtHandler())
+	mux.HandleFunc("/llms.txt", docs.LLMsTxtHandler())
+
 	// Admin routes mounted under /admin/
 	adminServer.RegisterRoutes(mux)
 

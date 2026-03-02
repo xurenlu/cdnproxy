@@ -143,6 +143,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// 首段 path 必须像域名，否则快速 400 节省带宽和 CPU（/docs、/llm.txt、/llms.txt 已由 mux 处理）
+	if !h.firstSegmentLooksLikeDomain(r.URL.Path) {
+		http.Error(w, "bad request: path must start with domain (e.g. /cdn.jsdelivr.net/...)", http.StatusBadRequest)
+		return
+	}
+
 	// 获取信号量
 	select {
 	case h.semaphore <- struct{}{}:
@@ -447,6 +453,43 @@ func (h *Handler) proxyNoCache(w http.ResponseWriter, r *http.Request, upstreamU
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// firstSegmentLooksLikeDomain 判断 path 首段是否像域名，用于快速拒绝无效请求
+func (h *Handler) firstSegmentLooksLikeDomain(path string) bool {
+	path = strings.TrimPrefix(path, "/")
+	if path == "" {
+		return false
+	}
+	// 完整 URL 在首段
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return true
+	}
+	slash := strings.IndexByte(path, '/')
+	var seg string
+	if slash == -1 {
+		seg = path
+	} else {
+		seg = path[:slash]
+	}
+	seg = strings.ToLower(seg)
+	if seg == "localhost" {
+		return true
+	}
+	// 必须包含点才像域名
+	if !strings.Contains(seg, ".") {
+		return false
+	}
+	// 排除常见静态文件扩展名（如 favicon.ico, robots.txt）
+	lastDot := strings.LastIndexByte(seg, '.')
+	if lastDot >= 0 && lastDot < len(seg)-1 {
+		suffix := seg[lastDot+1:]
+		switch suffix {
+		case "ico", "css", "js", "png", "jpg", "jpeg", "gif", "svg", "txt", "html", "htm", "xml", "json", "woff", "woff2", "ttf", "eot", "map":
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) buildUpstreamURL(r *http.Request) (string, error) {
