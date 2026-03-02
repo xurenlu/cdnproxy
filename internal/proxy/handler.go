@@ -21,6 +21,7 @@ import (
 	"cdnproxy/internal/cache"
 	"cdnproxy/internal/config"
 	"cdnproxy/internal/metrics"
+	"cdnproxy/internal/storage"
 )
 
 var (
@@ -43,6 +44,7 @@ type Handler struct {
 	webpConverter    *WebPConverter           // WebP转换器
 	residentialProxy *ResidentialProxyManager // 住宅IP代理管理器
 	aiAPIProxy       *AIAPIProxy              // AI API代理处理器
+	ipBanStore       *storage.IPBanStore      // IP 封禁（400/503 过多时自动封禁）
 }
 
 // WhitelistStore 接口定义
@@ -60,7 +62,7 @@ type CounterStore interface {
 	IncrementReferrerCount(ctx context.Context, host string) (int64, error)
 }
 
-func NewHandler(cfg config.Config, cacheStore cache.CacheInterface, whitelistStore WhitelistStore, configStore ConfigStore, counterStore CounterStore) http.Handler {
+func NewHandler(cfg config.Config, cacheStore cache.CacheInterface, whitelistStore WhitelistStore, configStore ConfigStore, counterStore CounterStore, ipBanStore *storage.IPBanStore) http.Handler {
 	// 优化 TCP 参数，适配跨境大文件传输
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
@@ -119,7 +121,35 @@ func NewHandler(cfg config.Config, cacheStore cache.CacheInterface, whitelistSto
 		webpConverter:    webpConverter,    // WebP转换器
 		residentialProxy: residentialProxy, // 住宅IP代理管理器
 		aiAPIProxy:       aiAPIProxy,       // AI API代理处理器
+		ipBanStore:       ipBanStore,       // IP 封禁
 	}
+}
+
+// getClientIP 从请求中提取客户端 IP（支持 X-Forwarded-For、X-Real-IP）
+func (h *Handler) getClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// 取第一个 IP（最原始客户端）
+		if idx := strings.Index(xff, ","); idx > 0 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+	addr := r.RemoteAddr
+	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
+		return addr[:idx]
+	}
+	return addr
+}
+
+// recordErrorAndMaybeBan 记录 400/503 错误，超阈值则自动封禁
+func (h *Handler) recordErrorAndMaybeBan(r *http.Request, statusCode int) {
+	if h.ipBanStore == nil {
+		return
+	}
+	h.ipBanStore.RecordError(r.Context(), h.getClientIP(r), statusCode)
 }
 
 // getBuffer 从内存池获取缓冲区
@@ -143,8 +173,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// IP 封禁检查：优先返回，明确告知被封禁
+	if h.ipBanStore != nil {
+		if banned, ttl := h.ipBanStore.IsBanned(r.Context(), h.getClientIP(r)); banned {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("X-Banned", "true")
+			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", ttl.Seconds()))
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(h.ipBanStore.FormatBanResponse(ttl)))
+			return
+		}
+	}
+
 	// 首段 path 必须像域名，否则快速 400 节省带宽和 CPU（/docs、/llm.txt、/llms.txt 已由 mux 处理）
 	if !h.firstSegmentLooksLikeDomain(r.URL.Path) {
+		h.recordErrorAndMaybeBan(r, http.StatusBadRequest)
 		http.Error(w, "bad request: path must start with domain (e.g. /cdn.jsdelivr.net/...)", http.StatusBadRequest)
 		return
 	}
@@ -154,6 +197,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case h.semaphore <- struct{}{}:
 		defer func() { <-h.semaphore }()
 	case <-r.Context().Done():
+		h.recordErrorAndMaybeBan(r, http.StatusServiceUnavailable)
 		http.Error(w, "service busy", http.StatusServiceUnavailable)
 		return
 	}
@@ -161,6 +205,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Incoming path is like: /cdn.jsdelivr.net/npm/bootstrap@... -> we must reconstruct the upstream URL
 	upstreamURL, err := h.buildUpstreamURL(r)
 	if err != nil {
+		h.recordErrorAndMaybeBan(r, http.StatusBadRequest)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}

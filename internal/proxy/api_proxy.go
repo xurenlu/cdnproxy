@@ -87,6 +87,7 @@ func (h *Handler) proxyWebSocket(w http.ResponseWriter, r *http.Request, upstrea
 	case h.wsSemaphore <- struct{}{}:
 		defer func() { <-h.wsSemaphore }()
 	case <-r.Context().Done():
+		h.recordErrorAndMaybeBan(r, http.StatusServiceUnavailable)
 		http.Error(w, "too many websocket connections", http.StatusServiceUnavailable)
 		return
 	}

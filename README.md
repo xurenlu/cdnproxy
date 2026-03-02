@@ -87,6 +87,10 @@ curl https://your-proxy-domain/api.anthropic.com/v1/messages \
 | `ADMIN_PASSWORD` | 管理员密码 | cdnproxy123! |
 | `API_DOMAINS` | 额外 API 域名（逗号分隔） | - |
 | `WEBP_ENABLED` | 启用 WebP 转换 | false |
+| `IP_BAN_ENABLED` | 启用 IP 自动封禁（400/503 过多时） | true |
+| `IP_BAN_THRESHOLD` | 触发封禁的错误次数阈值 | 30 |
+| `IP_BAN_WINDOW_SEC` | 统计窗口（秒） | 300 |
+| `IP_BAN_DURATION_SEC` | 封禁时长（秒） | 3600 |
 
 ### 管理界面
 
@@ -101,6 +105,10 @@ CDN 代理请求会进行访问控制，满足以下任一条件即可通过：
 3. **域名在白名单中**（在 `/admin/` 管理）
 
 **注意**: API 代理请求不受访问控制限制。
+
+### IP 自动封禁
+
+当某 IP 在 5 分钟内触发过多 400（错误路径）或 503（服务繁忙）时，将自动封禁 1 小时。封禁后返回 403，并明确提示「IP 已被临时封禁」。看过 `/docs` 的用户通常不会触发大量错误请求。
 
 ## 📚 文档
 

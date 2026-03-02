@@ -49,7 +49,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create admin server: %v", err)
 	}
-	proxyHandler := proxy.NewHandler(cfg, cacheStore, whitelistStore, configStore, counterStore)
+	ipBanStore := storage.NewIPBanStore(redisClient, storage.IPBanConfig{
+		Enabled:   cfg.IPBanEnabled,
+		Threshold: cfg.IPBanThreshold,
+		WindowSec: cfg.IPBanWindowSec,
+		BanSec:    cfg.IPBanDuration,
+	})
+	proxyHandler := proxy.NewHandler(cfg, cacheStore, whitelistStore, configStore, counterStore, ipBanStore)
 
 	mux := http.NewServeMux()
 	// Health check

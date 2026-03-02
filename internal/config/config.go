@@ -18,6 +18,12 @@ type Config struct {
 	SessionTTL    time.Duration
 	APIDomains    []string // API 服务域名列表（不缓存、支持 WebSocket/SSE）
 	WebPEnabled   bool     // WebP 转换功能开关
+
+	// IP 封禁：错误请求过多时自动封禁
+	IPBanEnabled   bool
+	IPBanThreshold int // 窗口内 400/503 次数阈值
+	IPBanWindowSec int // 统计窗口（秒）
+	IPBanDuration  int // 封禁时长（秒）
 }
 
 func Load() Config {
@@ -35,6 +41,12 @@ func Load() Config {
 
 	// WebP 功能开关（默认关闭）
 	webpEnabled := getenvBool("WEBP_ENABLED", false)
+
+	// IP 封禁配置（400/503 过多时自动封禁）
+	ipBanEnabled := getenvBool("IP_BAN_ENABLED", true)
+	ipBanThreshold := getenvInt("IP_BAN_THRESHOLD", 30)
+	ipBanWindow := getenvInt("IP_BAN_WINDOW_SEC", 300)
+	ipBanDuration := getenvInt("IP_BAN_DURATION_SEC", 3600)
 
 	// 默认的 API 域名列表（支持环境变量自定义）
 	apiDomains := []string{
@@ -59,14 +71,18 @@ func Load() Config {
 	}
 
 	return Config{
-		Port:          port,
-		RedisURL:      redisURL,
-		CacheTTL:      time.Duration(ttlSeconds) * time.Second,
-		AdminUsername: adminUser,
-		AdminPassword: adminPass,
-		SessionTTL:    time.Duration(sessionTTLSeconds) * time.Second,
-		APIDomains:    apiDomains,
-		WebPEnabled:   webpEnabled,
+		Port:            port,
+		RedisURL:        redisURL,
+		CacheTTL:        time.Duration(ttlSeconds) * time.Second,
+		AdminUsername:   adminUser,
+		AdminPassword:   adminPass,
+		SessionTTL:     time.Duration(sessionTTLSeconds) * time.Second,
+		APIDomains:     apiDomains,
+		WebPEnabled:    webpEnabled,
+		IPBanEnabled:   ipBanEnabled,
+		IPBanThreshold: ipBanThreshold,
+		IPBanWindowSec: ipBanWindow,
+		IPBanDuration:  ipBanDuration,
 	}
 }
 
