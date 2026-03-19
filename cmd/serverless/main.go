@@ -23,7 +23,10 @@ var (
 func init() {
 	log.Println("初始化 CDNProxy 云函数版本...")
 
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("配置加载失败: %v", err)
+	}
 
 	// 初始化缓存（使用内存缓存，适合云函数）
 	diskCache, err := cache.NewDiskCache("/tmp/cache", 100*1024*1024) // 100MB
@@ -47,8 +50,13 @@ func init() {
 		log.Fatalf("failed to create counter store: %v", err)
 	}
 
+	// 初始化 IP 封禁存储（云函数环境禁用，因为没有持久化）
+	ipBanStore := storage.NewIPBanStore(nil, storage.IPBanConfig{
+		Enabled: false, // 云函数环境禁用 IP 封禁
+	})
+
 	// 创建处理器
-	proxyHandler = proxy.NewHandler(cfg, diskCache, whitelistStore, configStore, counterStore)
+	proxyHandler = proxy.NewHandler(cfg, diskCache, whitelistStore, configStore, counterStore, ipBanStore)
 
 	// 云函数版本暂时不启用管理后台
 	adminHandler = nil

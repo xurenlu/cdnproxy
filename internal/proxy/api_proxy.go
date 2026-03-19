@@ -193,8 +193,8 @@ func (h *Handler) dialUpstreamWithTimeout(ctx context.Context, wsURL string, req
 
 	// 建立 TCP 连接（带超时）
 	dialer := &net.Dialer{
-		Timeout:   10 * time.Second, // 缩短连接超时
-		KeepAlive: 30 * time.Second, // 缩短保活时间
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", host)
 	if err != nil {
@@ -204,102 +204,9 @@ func (h *Handler) dialUpstreamWithTimeout(ctx context.Context, wsURL string, req
 	// 如果是 wss，需要 TLS 包装
 	if useTLS {
 		tlsConn := wrapTLS(conn, strings.Split(host, ":")[0])
-		if tlsConn == nil { // 添加nil检查
+		if tlsConn == nil {
 			return nil, fmt.Errorf("TLS handshake failed for host: %s", host)
 		}
-		conn = tlsConn
-	}
-
-	// 构建并发送 WebSocket 升级请求
-	upgradeReq := "GET " + path + " HTTP/1.1\r\n"
-	upgradeReq += "Host: " + strings.Split(host, ":")[0] + "\r\n"
-	for k, vals := range req.Header {
-		for _, v := range vals {
-			upgradeReq += k + ": " + v + "\r\n"
-		}
-	}
-	upgradeReq += "\r\n"
-
-	_, err = conn.Write([]byte(upgradeReq))
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-
-	// 读取响应头，确认升级成功
-	reader := bufio.NewReader(conn)
-	statusLine, err := reader.ReadString('\n')
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-
-	// 检查状态码是否为 101
-	if !strings.Contains(statusLine, "101") {
-		conn.Close()
-		return nil, io.ErrUnexpectedEOF
-	}
-
-	// 跳过响应头
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			conn.Close()
-			return nil, err
-		}
-		if line == "\r\n" || line == "\n" {
-			break
-		}
-	}
-
-	return conn, nil
-}
-
-// dialUpstream 建立到上游服务器的 TCP 连接并发送 HTTP 请求
-func (h *Handler) dialUpstream(wsURL string, req *http.Request) (net.Conn, error) {
-	// 解析 URL
-	var host string
-	var useTLS bool
-	if strings.HasPrefix(wsURL, "wss://") {
-		host = strings.TrimPrefix(wsURL, "wss://")
-		useTLS = true
-	} else {
-		host = strings.TrimPrefix(wsURL, "ws://")
-		useTLS = false
-	}
-
-	// 提取 host 和 path
-	pathStart := strings.Index(host, "/")
-	var path string
-	if pathStart > 0 {
-		path = host[pathStart:]
-		host = host[:pathStart]
-	} else {
-		path = "/"
-	}
-
-	// 如果 host 没有端口，添加默认端口
-	if !strings.Contains(host, ":") {
-		if useTLS {
-			host = host + ":443"
-		} else {
-			host = host + ":80"
-		}
-	}
-
-	// 建立 TCP 连接
-	dialer := &net.Dialer{
-		Timeout:   30 * time.Second,
-		KeepAlive: 60 * time.Second,
-	}
-	conn, err := dialer.Dial("tcp", host)
-	if err != nil {
-		return nil, err
-	}
-
-	// 如果是 wss，需要 TLS 包装
-	if useTLS {
-		tlsConn := wrapTLS(conn, strings.Split(host, ":")[0])
 		conn = tlsConn
 	}
 

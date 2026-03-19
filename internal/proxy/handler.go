@@ -110,8 +110,8 @@ func NewHandler(cfg config.Config, cacheStore cache.CacheInterface, whitelistSto
 				return http.ErrUseLastResponse // 不自动跟随重定向
 			},
 		},
-		semaphore:   make(chan struct{}, 50), // 最多50个并发
-		wsSemaphore: make(chan struct{}, 10), // 最多10个WebSocket连接
+		semaphore:   make(chan struct{}, cfg.MaxConcurrentRequests), // 使用配置的并发数
+		wsSemaphore: make(chan struct{}, cfg.MaxWebSocketConns),     // 使用配置的 WebSocket 连接数
 		bufferPool: sync.Pool{
 			New: func() interface{} {
 				buf := make([]byte, 64*1024) // 64KB 缓冲区
@@ -267,7 +267,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			if !isVideoOrAudio {
 				acceptEncoding := r.Header.Get("Accept-Encoding")
-				compressedBody, encoding := h.compressBody(body, acceptEncoding)
+				compressedBody, encoding := compressBody(body, acceptEncoding)
 				if encoding != "" {
 					w.Header().Set("Content-Encoding", encoding)
 					w.Header().Set("Vary", "Accept-Encoding")
@@ -363,10 +363,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cacheControl := cache.GetCacheControlByContentType(contentType)
 	w.Header().Set("Cache-Control", cacheControl)
 
-	// 定义大文件阈值（1MB），大于此值的文件使用流式传输
+	// 定义大文件阈值，大于此值的文件使用流式传输
 	// 但视频和音频文件即使很大也要缓存，因为CDN缓存对媒体文件很重要
-	const largeFileThreshold = 1 * 1024 * 1024
-	const videoFileThreshold = 100 * 1024 * 1024 // 视频文件阈值：100MB
+	largeFileThreshold := h.cfg.LargeFileThreshold
+	videoFileThreshold := h.cfg.VideoFileThreshold
 
 	var body []byte
 	if method == http.MethodGet {
@@ -459,7 +459,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// 再根据客户端需求压缩响应
 		acceptEncoding := r.Header.Get("Accept-Encoding")
-		compressedBody, encoding := h.compressBody(body, acceptEncoding)
+		compressedBody, encoding := compressBody(body, acceptEncoding)
 		if encoding != "" {
 			w.Header().Set("Content-Encoding", encoding)
 			w.Header().Set("Vary", "Accept-Encoding")
@@ -572,38 +572,6 @@ func (h *Handler) buildUpstreamURL(r *http.Request) (string, error) {
 	return "https://" + host + rest, nil
 }
 
-func (h *Handler) isAccessAllowed(r *http.Request) (bool, string) {
-	// 移除所有限制，允许所有访问
-	return true, "access allowed"
-}
-
-func isHopByHopHeader(k string) bool {
-	switch strings.ToLower(k) {
-	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
-		return true
-	}
-	return false
-}
-
-func copyHeaders(dst, src http.Header) {
-	for k, vals := range src {
-		if isHopByHopHeader(k) {
-			continue
-		}
-		dst[k] = vals
-	}
-}
-
-func containsAny(s string, subs []string) bool {
-	s = strings.ToLower(s)
-	for _, sub := range subs {
-		if strings.Contains(s, strings.ToLower(sub)) {
-			return true
-		}
-	}
-	return false
-}
-
 // isAPIDomain 检查 URL 是否属于 API 域名
 func (h *Handler) isAPIDomain(upstreamURL string) bool {
 	urlLower := strings.ToLower(upstreamURL)
@@ -620,30 +588,6 @@ func (h *Handler) isAPIDomain(upstreamURL string) bool {
 	}
 
 	return false
-}
-
-// compressBody 根据Accept-Encoding头压缩响应体
-func (h *Handler) compressBody(body []byte, acceptEncoding string) ([]byte, string) {
-	// 如果响应体太小，不进行压缩
-	if len(body) < 1024 {
-		return body, ""
-	}
-
-	// 检查是否已经压缩过
-	if strings.Contains(acceptEncoding, "gzip") {
-		var buf bytes.Buffer
-		gz := gzip.NewWriter(&buf)
-		if _, err := gz.Write(body); err == nil {
-			if err := gz.Close(); err == nil {
-				// 只有压缩后确实更小才使用压缩
-				if buf.Len() < len(body) {
-					return buf.Bytes(), "gzip"
-				}
-			}
-		}
-	}
-
-	return body, ""
 }
 
 // buildCacheKey 生成缓存键

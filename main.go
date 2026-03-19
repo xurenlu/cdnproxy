@@ -28,7 +28,10 @@ func main() {
 		log.Printf("Failed to set FD limit: %v", err)
 	}
 
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("配置加载失败: %v", err)
+	}
 
 	// 使用 Redis 缓存
 	redisClient, err := cache.NewRedisClient(cfg.RedisURL)
