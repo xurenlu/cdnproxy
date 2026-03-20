@@ -45,6 +45,7 @@ type Handler struct {
 	residentialProxy *ResidentialProxyManager // 住宅IP代理管理器
 	aiAPIProxy       *AIAPIProxy              // AI API代理处理器
 	ipBanStore       *storage.IPBanStore      // IP 封禁（400/503 过多时自动封禁）
+	validator        *InputValidator          // 输入验证器
 }
 
 // WhitelistStore 接口定义
@@ -96,6 +97,9 @@ func NewHandler(cfg config.Config, cacheStore cache.CacheInterface, whitelistSto
 	// 初始化WebP转换器（根据配置决定是否启用）
 	webpConverter := NewWebPConverter(cfg.WebPEnabled)
 
+	// 初始化输入验证器
+	validator := NewInputValidator()
+
 	return &Handler{
 		cfg:            cfg,
 		cache:          cacheStore,
@@ -122,6 +126,7 @@ func NewHandler(cfg config.Config, cacheStore cache.CacheInterface, whitelistSto
 		residentialProxy: residentialProxy, // 住宅IP代理管理器
 		aiAPIProxy:       aiAPIProxy,       // AI API代理处理器
 		ipBanStore:       ipBanStore,       // IP 封禁
+		validator:        validator,        // 输入验证器
 	}
 }
 
@@ -185,6 +190,35 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 输入验证：验证请求路径和查询参数
+	if h.validator != nil {
+		// 验证路径
+		if err := h.validator.ValidatePath(r.URL.Path); err != nil {
+			log.Printf("PATH VALIDATION FAILED: %s - %v", r.URL.Path, err)
+			h.recordErrorAndMaybeBan(r, http.StatusBadRequest)
+			http.Error(w, "invalid request path", http.StatusBadRequest)
+			return
+		}
+
+		// 验证查询参数
+		if r.URL.RawQuery != "" {
+			if err := h.validator.ValidateQuery(r.URL.RawQuery); err != nil {
+				log.Printf("QUERY VALIDATION FAILED: %s - %v", r.URL.RawQuery, err)
+				h.recordErrorAndMaybeBan(r, http.StatusBadRequest)
+				http.Error(w, "invalid query parameters", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// 验证 Headers（防止 header 注入）
+		if err := h.validator.ValidateHeaders(r.Header); err != nil {
+			log.Printf("HEADER VALIDATION FAILED: %v", err)
+			h.recordErrorAndMaybeBan(r, http.StatusBadRequest)
+			http.Error(w, "invalid headers", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// 首段 path 必须像域名，否则快速 400 节省带宽和 CPU（/docs、/llm.txt、/llms.txt 已由 mux 处理）
 	if !h.firstSegmentLooksLikeDomain(r.URL.Path) {
 		h.recordErrorAndMaybeBan(r, http.StatusBadRequest)
@@ -208,6 +242,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.recordErrorAndMaybeBan(r, http.StatusBadRequest)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
+	}
+
+	// 验证构建的上游 URL
+	if h.validator != nil {
+		if err := h.validator.ValidateUpstreamURL(upstreamURL); err != nil {
+			log.Printf("UPSTREAM URL VALIDATION FAILED: %s - %v", upstreamURL, err)
+			h.recordErrorAndMaybeBan(r, http.StatusBadRequest)
+			http.Error(w, "invalid upstream URL", http.StatusBadRequest)
+			return
+		}
 	}
 
 	// 检查是否是 API 域名（这些请求不缓存，支持 WebSocket/SSE/长连接）
