@@ -377,6 +377,10 @@ func TestValidateUpstreamURL_Valid(t *testing.T) {
 		"https://cdn.jsdelivr.net/npm/bootstrap",
 		"http://api.example.com/v1/data",
 		"https://example.com:8080/path",
+		"https://google.com/",       // 根路径
+		"https://example.com/",      // 根路径
+		"https://www.example.com/",  // 根路径
+		"https://google.com",        // 无路径（等价于根路径）
 	}
 
 	for _, urlStr := range validURLs {

@@ -233,7 +233,9 @@ func (v *InputValidator) ValidateURL(u *url.URL) error {
 	}
 
 	// 验证路径
-	if u.Path != "" {
+	if u.Path != "" && u.Path != "/" {
+		// 对于完整 URL，跳过根路径 "/" 的验证（这是合法的）
+		// 其他路径仍需验证
 		if err := v.ValidatePath(u.Path); err != nil {
 			// 对于完整 URL，放宽一些路径检查
 			if !strings.Contains(err.Error(), "path traversal") &&
