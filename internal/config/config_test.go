@@ -108,20 +108,43 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
-			name: "LOOP_MAX 非法",
+			name: "LOOP_MAX 无法解析时忽略不失败",
 			setupEnv: func() {
 				os.Setenv("ADMIN_PASSWORD", "longenough123")
 				os.Setenv("LOOP_MAX", "notint")
 			},
-			wantErr: true,
+			wantErr: false,
+			validateCfg: func(t *testing.T, cfg Config) {
+				if cfg.LoopMax != 0 {
+					t.Errorf("LoopMax = %d, want 0 (ignored)", cfg.LoopMax)
+				}
+			},
 		},
 		{
-			name: "LOOP_MAX 为 0",
+			name: "LOOP_MAX 为 0 时忽略不失败",
 			setupEnv: func() {
 				os.Setenv("ADMIN_PASSWORD", "longenough123")
 				os.Setenv("LOOP_MAX", "0")
 			},
-			wantErr: true,
+			wantErr: false,
+			validateCfg: func(t *testing.T, cfg Config) {
+				if cfg.LoopMax != 0 {
+					t.Errorf("LoopMax = %d, want 0 (ignored)", cfg.LoopMax)
+				}
+			},
+		},
+		{
+			name: "LOOP_TIMEOUT 无法解析时忽略不失败",
+			setupEnv: func() {
+				os.Setenv("ADMIN_PASSWORD", "longenough123")
+				os.Setenv("LOOP_TIMEOUT", "bad")
+			},
+			wantErr: false,
+			validateCfg: func(t *testing.T, cfg Config) {
+				if cfg.LoopTimeoutSet {
+					t.Error("LoopTimeoutSet should be false when value invalid")
+				}
+			},
 		},
 		{
 			name: "LOOP_TIMEOUT 为 0 表示立即计时到期",

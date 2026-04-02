@@ -116,12 +116,12 @@ func Load() (Config, error) {
 	if v := trimSpace(os.Getenv("LOOP_MAX")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			return Config{}, fmt.Errorf("LOOP_MAX: %w", err)
+			log.Printf("LOOP_MAX: 无法解析为整数 %q，已忽略（不启用请求数退出）: %v", v, err)
+		} else if n < 1 {
+			log.Printf("LOOP_MAX: 值无效（须为 >=1 的整数），当前为 %d，已忽略（不启用请求数退出）", n)
+		} else {
+			loopMax = n
 		}
-		if n < 1 {
-			return Config{}, errors.New("LOOP_MAX must be >= 1 when set")
-		}
-		loopMax = n
 	}
 
 	loopTimeoutSet := false
@@ -129,13 +129,13 @@ func Load() (Config, error) {
 	if v := trimSpace(os.Getenv("LOOP_TIMEOUT")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			return Config{}, fmt.Errorf("LOOP_TIMEOUT: %w", err)
+			log.Printf("LOOP_TIMEOUT: 无法解析为整数 %q，已忽略（不启用超时退出）: %v", v, err)
+		} else if n < 0 {
+			log.Printf("LOOP_TIMEOUT: 值无效（须为 >=0 的整数），当前为 %d，已忽略（不启用超时退出）", n)
+		} else {
+			loopTimeoutSet = true
+			loopTimeoutSec = n
 		}
-		if n < 0 {
-			return Config{}, errors.New("LOOP_TIMEOUT must be >= 0 when set")
-		}
-		loopTimeoutSet = true
-		loopTimeoutSec = n
 	}
 
 	cfg := Config{
