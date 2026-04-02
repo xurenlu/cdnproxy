@@ -69,7 +69,7 @@ export IPBURGER_PASSWORD="your_password"
 ### 1. OpenAI API 代理
 
 ```bash
-curl "https://cdnproxy.some.im/api.openai.com/v1/chat/completions" \
+curl "https://cdnproxy.facev.app/api.openai.com/v1/chat/completions" \
   -H "Authorization: Bearer YOUR_OPENAI_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -81,7 +81,7 @@ curl "https://cdnproxy.some.im/api.openai.com/v1/chat/completions" \
 ### 2. Claude API 代理
 
 ```bash
-curl "https://cdnproxy.some.im/api.anthropic.com/v1/messages" \
+curl "https://cdnproxy.facev.app/api.anthropic.com/v1/messages" \
   -H "x-api-key: YOUR_CLAUDE_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -93,7 +93,7 @@ curl "https://cdnproxy.some.im/api.anthropic.com/v1/messages" \
 ### 3. Gemini API 代理
 
 ```bash
-curl "https://cdnproxy.some.im/generativelanguage.googleapis.com/v1beta/models" \
+curl "https://cdnproxy.facev.app/generativelanguage.googleapis.com/v1beta/models" \
   -H "Authorization: Bearer YOUR_GEMINI_KEY"
 ```
 
@@ -104,7 +104,7 @@ import requests
 
 # OpenAI API
 response = requests.post(
-    "https://cdnproxy.some.im/api.openai.com/v1/chat/completions",
+    "https://cdnproxy.facev.app/api.openai.com/v1/chat/completions",
     headers={
         "Authorization": "Bearer YOUR_OPENAI_KEY",
         "Content-Type": "application/json"
@@ -121,7 +121,7 @@ print(response.json())
 
 ```javascript
 // OpenAI API
-fetch('https://cdnproxy.some.im/api.openai.com/v1/chat/completions', {
+fetch('https://cdnproxy.facev.app/api.openai.com/v1/chat/completions', {
   method: 'POST',
   headers: {
     'Authorization': 'Bearer YOUR_OPENAI_KEY',

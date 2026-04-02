@@ -100,27 +100,27 @@ if !isVideoOrAudio {
 #### 1. **视频文件CDN代理**
 ```bash
 # 代理视频文件
-curl "https://cdnproxy.some.im/cdn.jsdelivr.net/npm/video.js@8.6.1/dist/video.min.js"
+curl "https://cdnproxy.facev.app/cdn.jsdelivr.net/npm/video.js@8.6.1/dist/video.min.js"
 
 # 检查缓存头
-curl -I "https://cdnproxy.some.im/cdn.jsdelivr.net/npm/video.js@8.6.1/dist/video.min.js"
+curl -I "https://cdnproxy.facev.app/cdn.jsdelivr.net/npm/video.js@8.6.1/dist/video.min.js"
 # 返回: Cache-Control: public, max-age=604800
 ```
 
 #### 2. **音频文件CDN代理**
 ```bash
 # 代理音频文件
-curl "https://cdnproxy.some.im/cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/svgs/solid/music.svg"
+curl "https://cdnproxy.facev.app/cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/svgs/solid/music.svg"
 
 # 检查缓存头
-curl -I "https://cdnproxy.some.im/cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/svgs/solid/music.svg"
+curl -I "https://cdnproxy.facev.app/cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/svgs/solid/music.svg"
 # 返回: Cache-Control: public, max-age=604800
 ```
 
 #### 3. **Range请求支持**
 ```bash
 # 支持视频文件的Range请求，用于视频播放
-curl -H "Range: bytes=0-1023" "https://cdnproxy.some.im/example.com/video.mp4"
+curl -H "Range: bytes=0-1023" "https://cdnproxy.facev.app/example.com/video.mp4"
 ```
 
 ### 🔧 **技术实现**

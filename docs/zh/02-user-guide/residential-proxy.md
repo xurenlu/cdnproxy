@@ -117,7 +117,7 @@ PORT=8081 ./cdnproxy
 ### 1. **OpenAI API代理**
 ```bash
 # 通过住宅IP代理访问OpenAI API
-curl "https://cdnproxy.some.im/api.openai.com/v1/chat/completions" \
+curl "https://cdnproxy.facev.app/api.openai.com/v1/chat/completions" \
   -H "Authorization: Bearer YOUR_OPENAI_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -129,7 +129,7 @@ curl "https://cdnproxy.some.im/api.openai.com/v1/chat/completions" \
 ### 2. **Claude API代理**
 ```bash
 # 通过住宅IP代理访问Claude API
-curl "https://cdnproxy.some.im/api.anthropic.com/v1/messages" \
+curl "https://cdnproxy.facev.app/api.anthropic.com/v1/messages" \
   -H "x-api-key: YOUR_CLAUDE_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -141,7 +141,7 @@ curl "https://cdnproxy.some.im/api.anthropic.com/v1/messages" \
 ### 3. **Gemini API代理**
 ```bash
 # 通过住宅IP代理访问Gemini API
-curl "https://cdnproxy.some.im/generativelanguage.googleapis.com/v1beta/models" \
+curl "https://cdnproxy.facev.app/generativelanguage.googleapis.com/v1beta/models" \
   -H "Authorization: Bearer YOUR_GEMINI_KEY"
 ```
 

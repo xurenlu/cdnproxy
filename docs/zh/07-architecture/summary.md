@@ -214,5 +214,5 @@ CDNProxy 项目已经发展成为一个**企业级的 CDN 和 API 代理服务**
 ---
 
 **项目地址**: https://github.com/xurenlu/cdnproxy  
-**在线演示**: https://cdnproxy.some.im  
+**在线演示**: https://cdnproxy.facev.app  
 **文档中心**: https://github.com/xurenlu/cdnproxy/docs

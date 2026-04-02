@@ -1,5 +1,17 @@
 # 更新日志 / Changelog
 
+## v2.3.0-rc4 (2026-04-02)
+
+### ✨ 构建与发布
+
+- **GitHub Actions**：推送以 `v` 开头的 git tag 时，自动构建并推送 Docker 镜像到 GitHub Container Registry（`ghcr.io/<owner>/<repo>:<tag>`），使用工作流内置 `GITHUB_TOKEN`，无需额外密钥。
+
+### 📝 文档
+
+- 在线演示与示例中的公网域名由 `cdnproxy.some.im` 更新为 `cdnproxy.facev.app`（`docs/`）。
+
+---
+
 ## v2.3.0-rc3 (2026-03-21)
 
 ### 🐛 Bug 修复
