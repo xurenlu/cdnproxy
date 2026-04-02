@@ -1,5 +1,13 @@
 # 更新日志 / Changelog
 
+## v2.3.0-rc7 (2026-04-02)
+
+### 🧪 开发体验
+
+- 新增 `scripts/test_loop_lifecycle.rb`：本地 `go build` 后用 Ruby 子进程启动服务，实测 `LOOP_MAX`（第 N 次 HTTP 完成后退出）与 `LOOP_TIMEOUT`（运行秒数后退出）。就绪检测使用 **TCP 探测**，避免预检 HTTP 占用计数。
+
+---
+
 ## v2.3.0-rc6 (2026-04-02)
 
 ### 🐛 行为调整

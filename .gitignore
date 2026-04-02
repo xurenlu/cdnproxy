@@ -1,5 +1,6 @@
 # 编译输出
 cdnproxy
+cdnproxy-test
 *.exe
 *.test
 *.prof
@@ -29,3 +30,6 @@ coverage.html
 
 # 日志
 *.log
+
+# 本地脚本测试产物（scripts/test_loop_lifecycle.rb）
+tmp/
