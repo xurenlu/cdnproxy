@@ -14,7 +14,7 @@ func TestLoad(t *testing.T) {
 		"IP_BAN_ENABLED", "IP_BAN_THRESHOLD", "IP_BAN_WINDOW_SEC", "IP_BAN_DURATION_SEC",
 		"MAX_CONCURRENT_REQUESTS", "MAX_WEBSOCKET_CONNS",
 		"LARGE_FILE_THRESHOLD", "VIDEO_FILE_THRESHOLD", "MAX_CACHE_FILE_SIZE",
-		"API_DOMAINS",
+		"API_DOMAINS", "LOOP_MAX", "LOOP_TIMEOUT",
 	}
 	for _, env := range envVars {
 		originalEnv[env] = os.Getenv(env)
@@ -89,6 +89,52 @@ func TestLoad(t *testing.T) {
 				os.Setenv("MAX_CONCURRENT_REQUESTS", "0")
 			},
 			wantErr: true,
+		},
+		{
+			name: "LOOP_MAX / LOOP_TIMEOUT",
+			setupEnv: func() {
+				os.Setenv("ADMIN_PASSWORD", "longenough123")
+				os.Setenv("LOOP_MAX", "100")
+				os.Setenv("LOOP_TIMEOUT", "3600")
+			},
+			wantErr: false,
+			validateCfg: func(t *testing.T, cfg Config) {
+				if cfg.LoopMax != 100 {
+					t.Errorf("LoopMax = %d, want 100", cfg.LoopMax)
+				}
+				if !cfg.LoopTimeoutSet || cfg.LoopTimeoutSec != 3600 {
+					t.Errorf("LoopTimeoutSet=%v LoopTimeoutSec=%d, want true 3600", cfg.LoopTimeoutSet, cfg.LoopTimeoutSec)
+				}
+			},
+		},
+		{
+			name: "LOOP_MAX 非法",
+			setupEnv: func() {
+				os.Setenv("ADMIN_PASSWORD", "longenough123")
+				os.Setenv("LOOP_MAX", "notint")
+			},
+			wantErr: true,
+		},
+		{
+			name: "LOOP_MAX 为 0",
+			setupEnv: func() {
+				os.Setenv("ADMIN_PASSWORD", "longenough123")
+				os.Setenv("LOOP_MAX", "0")
+			},
+			wantErr: true,
+		},
+		{
+			name: "LOOP_TIMEOUT 为 0 表示立即计时到期",
+			setupEnv: func() {
+				os.Setenv("ADMIN_PASSWORD", "longenough123")
+				os.Setenv("LOOP_TIMEOUT", "0")
+			},
+			wantErr: false,
+			validateCfg: func(t *testing.T, cfg Config) {
+				if !cfg.LoopTimeoutSet || cfg.LoopTimeoutSec != 0 {
+					t.Errorf("LoopTimeoutSet=%v LoopTimeoutSec=%d, want true 0", cfg.LoopTimeoutSet, cfg.LoopTimeoutSec)
+				}
+			},
 		},
 		{
 			name: "API_DOMAINS 逗号分隔",

@@ -36,6 +36,12 @@ type Config struct {
 	LargeFileThreshold  int64 // 大文件阈值（字节）
 	VideoFileThreshold  int64 // 视频文件缓存阈值（字节）
 	MaxCacheFileSize    int64 // 最大缓存文件大小（字节）
+
+	// 生命周期：可选优雅退出（仅主服务进程）
+	LoopMax int // 0 = 未设置；>=1 时累计处理完该数 HTTP 请求后优雅退出
+	// LoopTimeoutSet 为 true 表示设置了 LOOP_TIMEOUT（含 0）；LoopTimeoutSec 为运行秒数
+	LoopTimeoutSet bool
+	LoopTimeoutSec int
 }
 
 func Load() (Config, error) {
@@ -106,6 +112,32 @@ func Load() (Config, error) {
 		}
 	}
 
+	loopMax := 0
+	if v := trimSpace(os.Getenv("LOOP_MAX")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("LOOP_MAX: %w", err)
+		}
+		if n < 1 {
+			return Config{}, errors.New("LOOP_MAX must be >= 1 when set")
+		}
+		loopMax = n
+	}
+
+	loopTimeoutSet := false
+	loopTimeoutSec := 0
+	if v := trimSpace(os.Getenv("LOOP_TIMEOUT")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("LOOP_TIMEOUT: %w", err)
+		}
+		if n < 0 {
+			return Config{}, errors.New("LOOP_TIMEOUT must be >= 0 when set")
+		}
+		loopTimeoutSet = true
+		loopTimeoutSec = n
+	}
+
 	cfg := Config{
 		Port:                  port,
 		RedisURL:              redisURL,
@@ -124,6 +156,9 @@ func Load() (Config, error) {
 		LargeFileThreshold:    largeFileThreshold,
 		VideoFileThreshold:    videoFileThreshold,
 		MaxCacheFileSize:      maxCacheFileSize,
+		LoopMax:               loopMax,
+		LoopTimeoutSet:        loopTimeoutSet,
+		LoopTimeoutSec:        loopTimeoutSec,
 	}
 
 	// 验证配置

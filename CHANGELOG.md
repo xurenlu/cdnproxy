@@ -1,5 +1,13 @@
 # 更新日志 / Changelog
 
+## v2.3.0-rc5 (2026-04-02)
+
+### ✨ 功能
+
+- **LOOP_MAX / LOOP_TIMEOUT**：可选环境变量，用于主进程在累计处理完 `LOOP_MAX` 个 HTTP 请求后，或运行 `LOOP_TIMEOUT` 秒后，触发**优雅退出**（`http.Server.Shutdown`：不再接受新连接，已建立连接上的在途请求继续处理）。`LOOP_MAX` 须为 ≥1 的整数；`LOOP_TIMEOUT` 为已设置时的非负整数秒（含 `0`）。
+
+---
+
 ## v2.3.0-rc4 (2026-04-02)
 
 ### ✨ 构建与发布

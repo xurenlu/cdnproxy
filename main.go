@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -108,13 +110,33 @@ func main() {
 	// Proxy catch-all (must be last)
 	mux.Handle("/", proxyHandler)
 
+	loopShutdown := make(chan struct{})
+	var shutdownOnce sync.Once
+	requestShutdown := func(reason string) {
+		shutdownOnce.Do(func() {
+			log.Printf("graceful shutdown: %s (no new requests, draining in-flight)", reason)
+			close(loopShutdown)
+		})
+	}
+
+	handler := panicRecoveryMiddleware(loggingMiddleware(loopDrainMiddleware(mux, cfg.LoopMax, func() {
+		requestShutdown("LOOP_MAX")
+	})))
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           panicRecoveryMiddleware(loggingMiddleware(mux)),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       10 * time.Minute,  // 支持长连接请求（API请求可能需要5分钟，SSE流式响应可能需要10分钟）
 		WriteTimeout:      10 * time.Minute,  // 支持长连接响应（API响应可能需要5分钟，SSE流式响应可能需要10分钟）
 		IdleTimeout:       60 * time.Second,  // 空闲超时保持较短，避免资源浪费
+	}
+
+	if cfg.LoopMax > 0 {
+		log.Printf("LOOP_MAX=%d: exit after %d completed HTTP requests", cfg.LoopMax, cfg.LoopMax)
+	}
+	if cfg.LoopTimeoutSet {
+		log.Printf("LOOP_TIMEOUT=%ds: exit after running that long", cfg.LoopTimeoutSec)
 	}
 
 	go func() {
@@ -124,16 +146,42 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
-	log.Println("shutting down...")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if cfg.LoopTimeoutSet {
+		go func() {
+			time.Sleep(time.Duration(cfg.LoopTimeoutSec) * time.Second)
+			requestShutdown("LOOP_TIMEOUT")
+		}()
+	}
+
+	// Graceful shutdown：信号或 LOOP_MAX / LOOP_TIMEOUT
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	select {
+	case sig := <-quit:
+		log.Printf("shutting down (signal: %v)...", sig)
+	case <-loopShutdown:
+		// 已在 requestShutdown 打日志
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("server shutdown error: %v", err)
 	}
+}
+
+// loopDrainMiddleware 在子 handler 返回后再计数；达到 loopMax 次后调用 onLimit（仅一次）。
+func loopDrainMiddleware(next http.Handler, loopMax int, onLimit func()) http.Handler {
+	if loopMax <= 0 {
+		return next
+	}
+	var count atomic.Uint64
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		n := count.Add(1)
+		if n == uint64(loopMax) {
+			onLimit()
+		}
+	})
 }
 
 // panicRecoveryMiddleware 全局 panic 恢复中间件，防止单个请求的 panic 导致整个服务崩溃
